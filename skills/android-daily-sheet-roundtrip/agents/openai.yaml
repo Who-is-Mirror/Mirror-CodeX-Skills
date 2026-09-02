@@ -1,0 +1,6 @@
+interface:
+  display_name: "Android Daily Sheet Roundtrip"
+  short_description: "Two-stage Codex sessions, sheet, and daily report flow"
+  default_prompt: "Use $android-daily-sheet-roundtrip to create today's editable sheet draft, then stop for my confirmation."
+policy:
+  allow_implicit_invocation: true
