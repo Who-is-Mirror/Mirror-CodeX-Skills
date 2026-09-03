@@ -5,9 +5,10 @@ import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { disconnectPlaywrightTransport, loadPlaywrightRuntime } from './playwright_runtime.mjs';
 
-export const REPAIR_SCHEMA = 'android-daily-sheet-repair-plan-v1';
+export const REPAIR_SCHEMA = 'android-daily-sheet-repair-plan-v2';
 export const DEFAULT_CDP_URL = 'http://127.0.0.1:9223';
-const REPAIR_KINDS = new Set(['restore', 'renumber', 'canonicalize-label', 'consistency-rewrite', 'format']);
+const AUDIT_SCHEMA = 'android-daily-sheet-change-audit-v1';
+const REPAIR_KINDS = new Set(['restore', 'renumber', 'canonicalize-label', 'consistency-rewrite']);
 
 function normalize(value) {
   return String(value ?? '').replace(/\r\n?/g, '\n').trim();
@@ -17,10 +18,14 @@ function normalizeCellValue(value) {
   return String(value ?? '').replace(/\r\n?/g, '\n');
 }
 
-export function validateRepairPlan(payload) {
+export function validateRepairPlan(payload, audit) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('修复计划必须是 JSON 对象');
   if (payload.schema !== REPAIR_SCHEMA) throw new Error(`修复计划 schema 必须是 ${REPAIR_SCHEMA}`);
+  if (!audit || audit.schema !== AUDIT_SCHEMA || !Array.isArray(audit.findings) || !Array.isArray(audit.suggested_repairs)) throw new Error(`必须提供 ${AUDIT_SCHEMA} 审计结果`);
+  if (payload.baseline_sha256 !== audit.baseline_sha256 || payload.current_sha256 !== audit.current_sha256) throw new Error('STALE_REPAIR_PLAN：修复计划与审计快照哈希不一致');
   if (!Array.isArray(payload.repairs) || payload.repairs.length === 0) throw new Error('repairs 必须是非空数组');
+  const findings = new Map(audit.findings.map((finding) => [finding.finding_id, finding]));
+  const suggestions = new Map(audit.suggested_repairs.map((repair) => [`${repair.finding_id}\u0000${String(repair.cell).toUpperCase()}`, repair]));
   const seen = new Set();
   const repairs = payload.repairs.map((entry, index) => {
     const cell = String(entry?.cell ?? '').toUpperCase();
@@ -31,19 +36,29 @@ export function validateRepairPlan(payload) {
     const after = normalizeCellValue(entry.after);
     const kind = normalize(entry.kind);
     const reason = normalize(entry.reason);
+    const findingId = normalize(entry.finding_id);
     if (before === after) throw new Error(`${cell} 的 before 与 after 相同`);
     if (/^[=+@]/.test(after) || /^-\d/.test(after)) throw new Error(`${cell} 的 after 疑似公式，日报模板只允许纯文本`);
     if (!kind) throw new Error(`${cell} 缺少 kind`);
     if (!REPAIR_KINDS.has(kind)) throw new Error(`${cell} 的 kind 不受支持: ${kind}`);
     if (!reason) throw new Error(`${cell} 缺少 reason`);
-    return { cell, before, after, kind, reason };
+    if (!findingId || !findings.has(findingId)) throw new Error(`${cell} 缺少有效 finding_id`);
+    const suggested = suggestions.get(`${findingId}\u0000${cell}`);
+    if (kind === 'consistency-rewrite') {
+      const finding = findings.get(findingId);
+      const allowedCells = new Set((finding.cells ?? []).map((item) => String(item?.cell ?? '').toUpperCase()));
+      if (finding.type !== 'stale_summary_after_task_deletion' || !allowedCells.has(cell)) throw new Error(`${cell} 的一致性改写不在该 finding 允许范围内`);
+    } else if (!suggested || suggested.before !== before || suggested.after !== after || suggested.kind !== kind || suggested.reason !== reason) {
+      throw new Error(`${cell} 与审计建议的精确修复不一致`);
+    }
+    return { cell, before, after, kind, reason, finding_id: findingId };
   });
-  return { schema: REPAIR_SCHEMA, repairs };
+  return { schema: REPAIR_SCHEMA, baseline_sha256: payload.baseline_sha256, current_sha256: payload.current_sha256, repairs };
 }
 
 function parseArgs(argv) {
   const options = {};
-  const allowed = new Set(['--cdp', '--document-id', '--sheet', '--plan', '--output-dir', '--result']);
+  const allowed = new Set(['--cdp', '--document-id', '--sheet', '--plan', '--audit', '--output-dir', '--result']);
   for (let index = 0; index < argv.length; index += 1) {
     const key = argv[index];
     if (key === '--help' || key === '-h') return { help: true };
@@ -52,7 +67,7 @@ function parseArgs(argv) {
     if (!value || value.startsWith('--')) throw new Error(`${key} 缺少值`);
     options[key.slice(2).replaceAll('-', '_')] = value;
   }
-  for (const key of ['document_id', 'sheet', 'plan', 'output_dir']) if (!options[key]) throw new Error(`缺少 --${key.replaceAll('_', '-')}`);
+  for (const key of ['document_id', 'sheet', 'plan', 'audit', 'output_dir']) if (!options[key]) throw new Error(`缺少 --${key.replaceAll('_', '-')}`);
   return options;
 }
 
@@ -83,13 +98,17 @@ async function locateSheetTab(page, name) {
 }
 
 export async function applyRepairs(options) {
-  const plan = validateRepairPlan(JSON.parse(await readFile(resolve(options.plan), 'utf8')));
+  const [rawPlan, audit] = await Promise.all([
+    readFile(resolve(options.plan), 'utf8').then(JSON.parse),
+    readFile(resolve(options.audit), 'utf8').then(JSON.parse),
+  ]);
+  const plan = validateRepairPlan(rawPlan, audit);
   const outputDir = resolve(options.output_dir);
   await mkdir(outputDir, { recursive: true });
   const { chromium } = await loadPlaywrightRuntime();
   const browser = await chromium.connectOverCDP(options.cdp || DEFAULT_CDP_URL, { timeout: 15000 });
   let page;
-  const applied = [];
+  const attempted = [];
   try {
     const pages = browser.contexts().flatMap((context) => context.pages())
       .filter((candidate) => candidate.url().includes(`/sheet/${options.document_id}`));
@@ -127,15 +146,23 @@ export async function applyRepairs(options) {
 
     try {
       for (const repair of plan.repairs) {
+        const immediate = await read(repair.cell);
+        if (immediate !== repair.before) throw new Error(`${repair.cell} 写入前即时值不匹配: ${JSON.stringify({ expected: repair.before, actual: immediate })}`);
+        attempted.push(repair);
         await write(repair.cell, repair.after);
         const actual = await read(repair.cell);
         if (actual !== repair.after) throw new Error(`${repair.cell} 写后复读不一致: ${JSON.stringify({ expected: repair.after, actual })}`);
-        applied.push(repair);
       }
     } catch (error) {
       const rollbackFailures = [];
-      for (const repair of [...applied].reverse()) {
+      for (const repair of [...attempted].reverse()) {
         try {
+          const current = await read(repair.cell);
+          if (current === repair.before) continue;
+          if (current !== repair.after) {
+            rollbackFailures.push({ cell: repair.cell, expected_repair_value: repair.after, actual: current, error: '并发变化，拒绝覆盖回滚' });
+            continue;
+          }
           await write(repair.cell, repair.before);
           const actual = await read(repair.cell);
           if (actual !== repair.before) rollbackFailures.push({ cell: repair.cell, expected: repair.before, actual });
@@ -144,7 +171,7 @@ export async function applyRepairs(options) {
         }
       }
       if (rollbackFailures.length) throw new Error(`${error.message}; 回滚失败: ${JSON.stringify(rollbackFailures)}`);
-      throw new Error(`${error.message}; 已回滚本次已写入单元格`);
+      throw new Error(`${error.message}; 已回滚本次尝试写入的单元格`);
     }
 
     const afterValues = {};
@@ -159,7 +186,8 @@ export async function applyRepairs(options) {
     }
     const result = {
       status: 'PASS', schema: REPAIR_SCHEMA, document_id: options.document_id,
-      sheet: normalize(options.sheet), repairs: plan.repairs, after_values: afterValues,
+      sheet: normalize(options.sheet), baseline_sha256: plan.baseline_sha256, current_sha256: plan.current_sha256,
+      repairs: plan.repairs, after_values: afterValues,
       screenshot: screenshots[0], screenshots,
     };
     if (options.result) {
@@ -174,7 +202,7 @@ export async function applyRepairs(options) {
 }
 
 function usage() {
-  return 'node scripts/apply_daily_sheet_repairs.mjs --document-id <id> --sheet YYYY-MM-DD --plan <plan.json> --output-dir <dir> [--result <result.json>]';
+  return 'node scripts/apply_daily_sheet_repairs.mjs --document-id <id> --sheet YYYY-MM-DD --audit <sheet-change-audit.json> --plan <plan.json> --output-dir <dir> [--result <result.json>]';
 }
 
 export async function main(argv = process.argv.slice(2)) {

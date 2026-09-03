@@ -183,12 +183,13 @@ Write confirmed repairs with a versioned plan and the guarded repair command:
 node "$SKILL_ROOT/scripts/apply_daily_sheet_repairs.mjs" \
   --document-id <managed-document-id> \
   --sheet YYYY-MM-DD \
+  --audit <sheet-change-audit.json> \
   --plan <repair-plan.json> \
   --output-dir <repair-evidence-dir> \
   --result <repair-result.json>
 ```
 
-The plan uses `schema=android-daily-sheet-repair-plan-v1` and entries shaped as `{cell,before,after,kind,reason}`. The command prechecks every `before` value before changing anything, writes only A:F cells, verifies every `after` value, rolls already-applied cells back when a write fails, and captures the repaired sheet. A precondition mismatch, rollback failure, write/readback mismatch, or screenshot failure blocks report generation.
+The plan uses `schema=android-daily-sheet-repair-plan-v2`, binds `baseline_sha256` and `current_sha256`, and uses entries shaped as `{cell,before,after,kind,reason,finding_id}`. Ordinary restoration, renumbering, and label repair must exactly match `audit.suggested_repairs[]`; a consistency rewrite is limited to cells named by the related consistency finding. The command prechecks every `before` value before changing anything, immediately rechecks each cell before its write, writes only A:F cells, verifies every `after` value, and rolls attempted cells back only while they still contain this transaction's expected postimage. A stale hash, invented/collateral write, precondition mismatch, concurrent change, rollback failure, write/readback mismatch, or screenshot failure blocks report generation.
 
 For every confirmed complete task deletion, remove the contiguous fully blank task rows after the value repair:
 
@@ -196,12 +197,13 @@ For every confirmed complete task deletion, remove the contiguous fully blank ta
 node "$SKILL_ROOT/scripts/compact_daily_sheet_rows.mjs" \
   --document-id <managed-document-id> \
   --sheet YYYY-MM-DD \
+  --audit <sheet-change-audit.json> \
   --plan <row-compaction-plan.json> \
   --output-dir <repair-evidence-dir> \
   --result <row-compaction-result.json>
 ```
 
-The plan uses `schema=android-daily-sheet-row-compaction-v1`. Each operation names `start_row`, `end_row`, exact `anchors_before[]`, and exact `anchors_after[]`. The command refuses to delete unless every A:F cell in the target rows is blank and all before anchors match. It deletes entire rows through the workbook dimension API so values, formatting, merges, and calculated heights below the gap move together, then verifies the after anchors and captures a screenshot. A blank separator is allowed only between two different scopes according to the template; a deleted task must not leave blank rows inside a scope.
+The plan uses `schema=android-daily-sheet-row-repair-plan-v3`, binds the audit hashes, and contains one or more disjoint `operations[]` with `action=insert|delete`. Complete-task deletion operations name an accepted `missing_task` finding ID and its exact baseline `start_row`/`end_row`; separator repairs must be copied exactly from `audit.suggested_row_repairs[]`. Every operation includes nonblank `anchors_before[]`, `anchors_after[]`, and a reason. The validator sorts operations bottom-to-top and rejects unconfirmed, enlarged, overlapping, invented, or stale ranges. The command refuses a delete unless every A:F cell in its target range is blank and all before anchors match. It inserts/deletes entire rows through the workbook dimension API in the validated order so values, formatting, merges, and calculated heights below the edit move together, then verifies after anchors and captures a screenshot. If a later check, screenshot, or result write fails, it applies inverse row operations in reverse order, verifies the original anchors, and requires a fresh full audit because compensated row styles and merges may still differ. A failed compensation is `RECOVERY_REQUIRED` and must never be retried blindly. A blank separator is allowed only between different scopes according to the template; a deleted task must not leave blank rows inside a scope.
 
 After all authorized repairs and row compaction, run `run_stage_b_fast.mjs` once in a new output directory. That post-repair snapshot, not the baseline, pre-repair read, repair plan, or an in-memory reconstruction, is the only input to report preparation. Audit the generated Markdown and `report_view.json` against its `daily-facts.json`, including surviving task order and numbering. If the sheet still displays `2.` after task 1 was deleted, or still contains the deleted task's blank row block, the report must not silently hide either defect; repair the sheet first or stop.
 

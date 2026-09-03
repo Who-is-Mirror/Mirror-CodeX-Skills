@@ -22,6 +22,19 @@ const sha256 = (value) => createHash('sha256').update(JSON.stringify(value)).dig
 const footerKey = (value) => text(value).replace('依赖/需协调', '依赖 / 需协调');
 const footerValue = (row) => [row?.E, row?.D, row?.F].map(text).find(Boolean) ?? '';
 
+function evidenceBoundary(payload) {
+  return Object.fromEntries(['document_id', 'sheet_id', 'sheet_name', 'report_date'].map((key) => [key, text(payload?.[key])]).filter(([, value]) => value));
+}
+
+function evidenceHash(payload, rows) {
+  return sha256({ boundary: evidenceBoundary(payload), rows });
+}
+
+function rowCell(rows, cell) {
+  const match = String(cell).toUpperCase().match(/^([A-F])([1-9]\d*)$/);
+  return match ? (rows[Number(match[2]) - 1]?.[match[1]] ?? '') : '';
+}
+
 function outsideAfContent(payload) {
   const found = [];
   for (const item of payload?.outside_template_cells ?? []) {
@@ -92,6 +105,12 @@ function issue(type, severity, message, details = {}) {
   return { type, severity, message, ...details };
 }
 
+function semanticAnchor(rows, rowNumber) {
+  const row = rows[rowNumber - 1];
+  for (const column of ['C', 'A', 'B', 'D', 'E', 'F']) if (text(row?.[column])) return { cell: `${column}${rowNumber}`, value: row[column] };
+  return null;
+}
+
 function parseScopes(rows) {
   const starts = [];
   for (let index = 1; index < rows.length; index += 1) {
@@ -107,11 +126,12 @@ function parseScopes(rows) {
     const source = rows.slice(start, end + 1);
     const identity = scopeKey(rows[start]);
     const findings = [];
-    if (!rows[start].A || !rows[start].B) findings.push(issue('missing_scope_identity', 'blocker', `第 ${rows[start].rowNumber} 行缺少范围身份`));
-    if (source[1]?.D !== '当前结果') findings.push(issue('missing_current_result_row', 'blocker', `范围 ${identity} 缺少“当前结果”行`));
+    if (!rows[start].A) findings.push(issue('missing_scope_identity', 'blocker', `第 ${rows[start].rowNumber} 行缺少项目 / 客户`, { semantic: 'project_customer', cell: `A${rows[start].rowNumber}` }));
+    if (!rows[start].B) findings.push(issue('missing_scope_identity', 'blocker', `第 ${rows[start].rowNumber} 行缺少类型`, { semantic: 'work_type', cell: `B${rows[start].rowNumber}` }));
+    if (source[1]?.D !== '当前结果') findings.push(issue('missing_current_result_row', 'blocker', `范围 ${identity} 缺少“当前结果”行`, { semantic: 'current_result_label', cell: `D${rows[start].rowNumber + 1}` }));
     if (!text(rows[start].E)) findings.push(issue('missing_required_content', 'blocker', `范围 ${identity} 的“今日主题”内容为空`, { semantic: 'today_topic', cell: `E${rows[start].rowNumber}` }));
     if (source[1]?.D === '当前结果' && !text(source[1]?.E)) findings.push(issue('missing_required_content', 'blocker', `范围 ${identity} 的“当前结果”内容为空`, { semantic: 'current_result', cell: `E${rows[start].rowNumber + 1}` }));
-    if (text(rows[start].F) || text(source[1]?.F)) findings.push(issue('invalid_overview_status', 'blocker', `范围 ${identity} 的今日概况不允许填写状态`));
+    if (text(rows[start].F) || text(source[1]?.F)) findings.push(issue('invalid_overview_status', 'blocker', `范围 ${identity} 的今日概况不允许填写状态`, { scope: identity, cells: [`F${rows[start].rowNumber}`, `F${rows[start].rowNumber + 1}`].filter((cell) => text(rowCell(rows, cell))) }));
 
     const consumed = new Set([start, start + 1]);
     const tasks = [];
@@ -124,21 +144,22 @@ function parseScopes(rows) {
         const task = { rowNumber: row.rowNumber, heading: row.C, name: stripNumber(row.C), number: numberOf(row.C), rows: [row, next, result] };
         tasks.push(task);
         consumed.add(index); consumed.add(index + 1); consumed.add(index + 2);
-        if (!row.C || !task.name) findings.push(issue('missing_task_heading', 'blocker', `第 ${row.rowNumber} 行缺少任务标题`, { row: row.rowNumber }));
-        if (next?.D !== '怎么做的') findings.push(issue('missing_task_how', 'blocker', `任务“${task.name || '未知'}”缺少“怎么做的”`, { row: row.rowNumber + 1 }));
-        if (result?.D !== '结果') findings.push(issue('missing_task_result', 'blocker', `任务“${task.name || '未知'}”缺少“结果”`, { row: row.rowNumber + 2 }));
-        if (!text(row.E)) findings.push(issue('missing_required_content', 'blocker', `任务“${task.name || '未知'}”的“做了什么”内容为空`, { semantic: 'did', cell: `E${row.rowNumber}` }));
-        if (next?.D === '怎么做的' && !text(next?.E)) findings.push(issue('missing_required_content', 'blocker', `任务“${task.name || '未知'}”的“怎么做的”内容为空`, { semantic: 'how', cell: `E${row.rowNumber + 1}` }));
-        if (result?.D === '结果' && !text(result?.E)) findings.push(issue('missing_required_content', 'blocker', `任务“${task.name || '未知'}”的“结果”内容为空`, { semantic: 'result', cell: `E${row.rowNumber + 2}` }));
-        if (text(row.F) || (next?.D === '怎么做的' && text(next?.F))) findings.push(issue('invalid_task_field_status', 'blocker', `任务“${task.name || '未知'}”只有“结果”行允许填写状态`));
-        if (result?.D === '结果' && !STATUSES.has(text(result?.F))) findings.push(issue('invalid_task_status', 'blocker', `任务“${task.name || '未知'}”状态缺失或非法`, { row: row.rowNumber + 2, actual: text(result?.F) }));
+        if (!row.C || !task.name) findings.push(issue('missing_task_heading', 'blocker', `第 ${row.rowNumber} 行缺少任务标题`, { row: row.rowNumber, semantic: 'task_heading', cell: `C${row.rowNumber}` }));
+        if (next?.D !== '怎么做的') findings.push(issue('missing_task_how', 'blocker', `任务“${task.name || '未知'}”缺少“怎么做的”`, { row: row.rowNumber + 1, semantic: 'how_label', cell: `D${row.rowNumber + 1}` }));
+        if (result?.D !== '结果') findings.push(issue('missing_task_result', 'blocker', `任务“${task.name || '未知'}”缺少“结果”`, { row: row.rowNumber + 2, semantic: 'result_label', cell: `D${row.rowNumber + 2}` }));
+        if (!text(row.E)) findings.push(issue('missing_required_content', 'blocker', `任务“${task.name || '未知'}”的“做了什么”内容为空`, { scope: identity, task: task.name, semantic: 'did', cell: `E${row.rowNumber}` }));
+        if (next?.D === '怎么做的' && !text(next?.E)) findings.push(issue('missing_required_content', 'blocker', `任务“${task.name || '未知'}”的“怎么做的”内容为空`, { scope: identity, task: task.name, semantic: 'how', cell: `E${row.rowNumber + 1}` }));
+        if (result?.D === '结果' && !text(result?.E)) findings.push(issue('missing_required_content', 'blocker', `任务“${task.name || '未知'}”的“结果”内容为空`, { scope: identity, task: task.name, semantic: 'result', cell: `E${row.rowNumber + 2}` }));
+        const invalidFieldStatusCells = [`F${row.rowNumber}`, `F${row.rowNumber + 1}`].filter((cell) => text(rowCell(rows, cell)));
+        if (invalidFieldStatusCells.length) findings.push(issue('invalid_task_field_status', 'blocker', `任务“${task.name || '未知'}”只有“结果”行允许填写状态`, { scope: identity, task: task.name, cells: invalidFieldStatusCells }));
+        if (result?.D === '结果' && !STATUSES.has(text(result?.F))) findings.push(issue('invalid_task_status', 'blocker', `任务“${task.name || '未知'}”状态缺失或非法`, { scope: identity, task: task.name, row: row.rowNumber + 2, semantic: 'status', cell: `F${row.rowNumber + 2}`, actual: text(result?.F) }));
         task.valid = row.D === '做了什么' && next?.D === '怎么做的' && result?.D === '结果' && Boolean(text(row.E) && text(next?.E) && text(result?.E)) && STATUSES.has(text(result?.F));
       }
       if (FOOTERS.includes(row.C)) {
         footers.push({ rowNumber: row.rowNumber, label: row.C, row }); consumed.add(index);
-        if (!footerValue(row)) findings.push(issue('missing_required_content', 'blocker', `“${row.C}”内容为空`, { semantic: footerKey(row.C), cell: `E${row.rowNumber}` }));
+        if (!footerValue(row)) findings.push(issue('missing_required_content', 'blocker', `“${row.C}”内容为空`, { semantic: FOOTER_SEMANTICS.get(footerKey(row.C)) ?? footerKey(row.C), cell: `E${row.rowNumber}` }));
         if ([row.D, row.E, row.F].map(text).filter(Boolean).length > 1) findings.push(issue('ambiguous_footer_content', 'blocker', `“${row.C}”在 D:F 多个位置同时有内容，无法无损判断`, { row: row.rowNumber }));
-        if (row.C !== footerKey(row.C)) findings.push(issue('canonical_label_drift', 'repair', `第 ${row.rowNumber} 行标签应为“${footerKey(row.C)}”`, { repairs: [{ cell: `C${row.rowNumber}`, before: row.C, after: footerKey(row.C), kind: 'canonicalize-label' }] }));
+        if (row.C !== footerKey(row.C)) findings.push(issue('canonical_label_drift', 'repair', `第 ${row.rowNumber} 行标签应为“${footerKey(row.C)}”`, { repairs: [{ cell: `C${row.rowNumber}`, before: row.C, after: footerKey(row.C), kind: 'canonicalize-label', reason: '恢复日报模板的标准页脚标签' }] }));
       }
     }
     const lastSemantic = Math.max(start, ...tasks.flatMap((task) => task.rows.map((row) => row?.rowNumber ? row.rowNumber - 1 : start)), ...footers.map((footer) => footer.rowNumber - 1));
@@ -159,7 +180,7 @@ function parseScopes(rows) {
     const names = tasks.map((task) => task.name);
     const duplicates = names.filter((name, index) => name && names.indexOf(name) !== index);
     if (duplicates.length) findings.push(issue('duplicate_task', 'confirm', `范围内存在重复任务: ${[...new Set(duplicates)].join('、')}`, { scope: identity, tasks: [...new Set(duplicates)] }));
-    const numberRepairs = tasks.flatMap((task, index) => task.number === index + 1 ? [] : [{ cell: `C${task.rowNumber}`, before: task.heading, after: `${index + 1}. ${task.name}`, kind: 'renumber' }]);
+    const numberRepairs = tasks.flatMap((task, index) => task.number === index + 1 ? [] : [{ cell: `C${task.rowNumber}`, before: task.heading, after: `${index + 1}. ${task.name}`, kind: 'renumber', reason: '按当前存续任务顺序恢复连续编号' }]);
     if (numberRepairs.length) findings.push(issue('task_numbering_drift', 'repair', '任务编号不连续', { repairs: numberRepairs }));
     const scope = { identity, A: rows[start].A, B: rows[start].B, startRow: rows[start].rowNumber, endRow: rows[end].rowNumber, rows: source, tasks, footers, findings };
     findings.push(...identityFindings(scope));
@@ -171,13 +192,47 @@ function parseScopes(rows) {
       if (!blank(rows[index])) globalFindings.push(issue('unknown_nonblank_row', 'blocker', `第 ${rows[index].rowNumber} 行位于首个范围之前且无法归类`, { row: rows[index].rowNumber }));
     }
     const leadingBlankCount = rows.slice(1, starts[0]).filter(blank).length;
-    if (leadingBlankCount) globalFindings.push(issue('separator_count_drift', 'repair', `表头与首个范围之间存在 ${leadingBlankCount} 个空白行`, { rows: rows.slice(1, starts[0]).filter(blank).map((row) => row.rowNumber) }));
+    if (leadingBlankCount) {
+      const startRow = 2;
+      const endRow = starts[0];
+      const firstScopeRow = starts[0] + 1;
+      globalFindings.push(issue('separator_count_drift', 'repair', `表头与首个范围之间存在 ${leadingBlankCount} 个空白行`, {
+        rows: rows.slice(1, starts[0]).filter(blank).map((row) => row.rowNumber),
+        row_operation: {
+          action: 'delete', start_row: startRow, end_row: endRow,
+          anchors_before: [semanticAnchor(rows, 1), semanticAnchor(rows, firstScopeRow)].filter(Boolean),
+          anchors_after: [semanticAnchor(rows, 1), { ...semanticAnchor(rows, firstScopeRow), cell: `C${firstScopeRow - leadingBlankCount}` }].filter(Boolean),
+          reason: '删除表头与首个范围之间多余的空白行',
+        },
+      }));
+    }
   }
   const identities = scopes.map((scope) => scope.identity);
   for (const identity of new Set(identities.filter((value, index) => identities.indexOf(value) !== index))) globalFindings.push(issue('duplicate_scope', 'confirm', `存在重复范围身份: ${identity.replace('\u0000', ' / ')}`, { scope: identity }));
   for (let index = 0; index + 1 < scopes.length; index += 1) {
     const count = scopes[index + 1].startRow - scopes[index].endRow - 1;
-    if (count !== 1) globalFindings.push(issue('separator_count_drift', 'repair', `范围“${scopes[index].A} / ${scopes[index].B}”与下一范围之间应恰有 1 个空白行，实际 ${count}`, { scope: scopes[index].identity, actual: count }));
+    if (count !== 1) {
+      const previous = scopes[index];
+      const next = scopes[index + 1];
+      let rowOperation;
+      if (count === 0) {
+        rowOperation = {
+          action: 'insert', start_row: next.startRow, end_row: next.startRow,
+          anchors_before: [semanticAnchor(rows, previous.endRow), semanticAnchor(rows, next.startRow)].filter(Boolean),
+          anchors_after: [semanticAnchor(rows, previous.endRow), { ...semanticAnchor(rows, next.startRow), cell: `C${next.startRow + 1}` }].filter(Boolean),
+          reason: '在两个范围之间插入一个空白分隔行',
+        };
+      } else if (count > 1) {
+        const deleteCount = count - 1;
+        rowOperation = {
+          action: 'delete', start_row: previous.endRow + 2, end_row: next.startRow - 1,
+          anchors_before: [semanticAnchor(rows, previous.endRow), semanticAnchor(rows, next.startRow)].filter(Boolean),
+          anchors_after: [semanticAnchor(rows, previous.endRow), { ...semanticAnchor(rows, next.startRow), cell: `C${next.startRow - deleteCount}` }].filter(Boolean),
+          reason: '仅保留两个范围之间的一个空白分隔行',
+        };
+      }
+      globalFindings.push(issue('separator_count_drift', 'repair', `范围“${previous.A} / ${previous.B}”与下一范围之间应恰有 1 个空白行，实际 ${count}`, { scope: previous.identity, actual: count, ...(rowOperation ? { row_operation: rowOperation } : {}) }));
+    }
   }
   return { scopes, findings: globalFindings };
 }
@@ -193,8 +248,39 @@ function compareScope(baseline, current) {
   }
   const baselineByName = new Map(baseline.tasks.map((task) => [task.name, task]));
   const currentByName = new Map(current.tasks.map((task) => [task.name, task]));
-  for (const task of baseline.tasks) if (!currentByName.has(task.name)) findings.push(issue('missing_task', 'confirm', `基线任务“${task.name}”在当前表格中缺失`, { scope: current.identity, task: task.name }));
-  for (const task of current.tasks) if (!baselineByName.has(task.name)) findings.push(issue('added_or_renamed_task', 'confirm', `当前出现新增或改名任务“${task.name}”`, { scope: current.identity, task: task.name }));
+  for (const task of baseline.tasks) if (!currentByName.has(task.name)) {
+    findings.push(issue('missing_task', 'confirm', `基线任务“${task.name}”在当前表格中缺失`, { scope: current.identity, task: task.name, baseline_rows: { start: task.rowNumber, end: task.rowNumber + 2 } }));
+    const staleCells = [];
+    for (const [offset, semantic] of [[0, 'today_topic'], [1, 'current_result']]) {
+      const beforeValue = text(baseline.rows[offset]?.E);
+      const afterValue = text(current.rows[offset]?.E);
+      if (beforeValue === afterValue && afterValue.includes(task.name)) staleCells.push({ cell: `E${current.rows[offset].rowNumber}`, semantic, value: afterValue });
+    }
+    const baselineFooters = new Map(baseline.footers.map((footer) => [footerKey(footer.label), footerValue(footer.row)]));
+    for (const footer of current.footers) {
+      const semantic = footerKey(footer.label);
+      const afterValue = footerValue(footer.row);
+      if (baselineFooters.get(semantic) === afterValue && text(afterValue).includes(task.name)) {
+        const column = ['E', 'D', 'F'].find((candidate) => text(footer.row[candidate])) ?? 'E';
+        staleCells.push({ cell: `${column}${footer.rowNumber}`, semantic: FOOTER_SEMANTICS.get(semantic) ?? semantic, value: afterValue });
+      }
+    }
+    if (staleCells.length) findings.push(issue('stale_summary_after_task_deletion', 'blocker', `删除任务“${task.name}”后，概况或页脚仍保留该任务的基线文字`, { scope: current.identity, task: task.name, cells: staleCells }));
+    const reviewCells = [
+      ...[[0, 'today_topic'], [1, 'current_result']].map(([offset, semantic]) => ({
+        cell: `E${current.rows[offset].rowNumber}`, semantic,
+        baseline: text(baseline.rows[offset]?.E), current: text(current.rows[offset]?.E),
+      })),
+      ...current.footers.map((footer) => {
+        const label = footerKey(footer.label);
+        const column = ['E', 'D', 'F'].find((candidate) => text(footer.row[candidate])) ?? 'E';
+        const baselineFooter = baseline.footers.find((candidate) => footerKey(candidate.label) === label);
+        return { cell: `${column}${footer.rowNumber}`, semantic: FOOTER_SEMANTICS.get(label) ?? label, baseline: footerValue(baselineFooter?.row), current: footerValue(footer.row) };
+      }),
+    ];
+    findings.push(issue('dependent_consistency_review', 'confirm', `删除任务“${task.name}”后必须确认今日概况和三个页脚是否需要同步改写`, { scope: current.identity, task: task.name, cells: reviewCells }));
+  }
+  for (const task of current.tasks) if (!baselineByName.has(task.name)) findings.push(issue('added_or_renamed_task', 'confirm', `当前出现新增或改名任务“${task.name}”`, { scope: current.identity, task: task.name, row: task.rowNumber }));
   const hasDuplicateTasks = new Set(current.tasks.map((task) => task.name)).size !== current.tasks.length;
   const baselineOrder = baseline.tasks.map((task) => task.name).filter((name) => currentByName.has(name));
   const currentOrder = current.tasks.map((task) => task.name).filter((name) => baselineByName.has(name));
@@ -227,6 +313,94 @@ function compareScope(baseline, current) {
   return { findings, modifications };
 }
 
+function semanticCells(parsed, rows) {
+  const cells = new Map(COLUMNS.map((column) => [`${column}1`, { semantic: `header_${column.toLowerCase()}` }]));
+  for (const scope of parsed.scopes) {
+    const start = scope.startRow;
+    for (const [cell, semantic] of [
+      [`A${start}`, 'project_customer'], [`B${start}`, 'work_type'], [`C${start}`, 'overview_label'],
+      [`D${start}`, 'today_topic_label'], [`E${start}`, 'today_topic'],
+      [`D${start + 1}`, 'current_result_label'], [`E${start + 1}`, 'current_result'],
+    ]) cells.set(cell, { semantic, scope: scope.identity });
+    for (const task of scope.tasks) {
+      const row = task.rowNumber;
+      for (const [cell, semantic] of [
+        [`C${row}`, 'task_heading'], [`D${row}`, 'did_label'], [`E${row}`, 'did'],
+        [`D${row + 1}`, 'how_label'], [`E${row + 1}`, 'how'],
+        [`D${row + 2}`, 'result_label'], [`E${row + 2}`, 'result'], [`F${row + 2}`, 'status'],
+      ]) cells.set(cell, { semantic, scope: scope.identity, task: task.name });
+    }
+    for (const footer of scope.footers) {
+      const semantic = FOOTER_SEMANTICS.get(footerKey(footer.label)) ?? footerKey(footer.label);
+      cells.set(`C${footer.rowNumber}`, { semantic: `${semantic}_label`, scope: scope.identity });
+      for (const column of ['D', 'E', 'F']) if (text(rows[footer.rowNumber - 1]?.[column])) cells.set(`${column}${footer.rowNumber}`, { semantic, scope: scope.identity });
+    }
+  }
+  return cells;
+}
+
+function exactPartialClearRepairs(baselineRows, currentRows, baseline, current) {
+  if (baselineRows.length !== currentRows.length) return [];
+  for (let index = 0; index < baselineRows.length; index += 1) {
+    const before = baselineRows[index];
+    const after = currentRows[index];
+    if (blank(before) && !blank(after)) return [];
+    for (const column of ['A', 'B', 'C', 'D']) {
+      if (text(after[column]) && after[column] !== before[column]) return [];
+    }
+  }
+  const excludedRows = new Set();
+  const currentScopes = new Map(current.scopes.map((scope) => [scope.identity, scope]));
+  const allBaselineCellsBlank = (start, end) => {
+    for (let row = start; row <= end; row += 1) for (const column of COLUMNS) {
+      if (text(baselineRows[row - 1]?.[column]) && text(currentRows[row - 1]?.[column])) return false;
+    }
+    return true;
+  };
+  for (const scope of baseline.scopes) {
+    const currentScope = currentScopes.get(scope.identity);
+    if (!currentScope && allBaselineCellsBlank(scope.startRow, scope.endRow)) {
+      for (let row = scope.startRow; row <= scope.endRow; row += 1) excludedRows.add(row);
+      continue;
+    }
+    const currentTasks = new Set(currentScope?.tasks.map((task) => task.name) ?? []);
+    for (const task of scope.tasks) if (!currentTasks.has(task.name) && allBaselineCellsBlank(task.rowNumber, task.rowNumber + 2)) {
+      for (let row = task.rowNumber; row <= task.rowNumber + 2; row += 1) excludedRows.add(row);
+    }
+  }
+  const semantics = semanticCells(baseline, baselineRows);
+  const repairs = [];
+  for (let row = 1; row <= baselineRows.length; row += 1) {
+    if (excludedRows.has(row)) continue;
+    for (const column of COLUMNS) {
+      const before = baselineRows[row - 1]?.[column] ?? '';
+      const after = currentRows[row - 1]?.[column] ?? '';
+      if (!text(before) || text(after)) continue;
+      const cell = `${column}${row}`;
+      const identity = semantics.get(cell) ?? { semantic: 'required_cell' };
+      repairs.push({
+        cell, ...identity, baseline_preimage: before,
+        before: after, after: before, kind: 'restore', reason: '从本次 Stage A 精确基线恢复局部误删内容',
+      });
+    }
+  }
+  return repairs;
+}
+
+const SCOPE_ALIGNMENT_FINDINGS = new Set([
+  'missing_current_result_row',
+  'missing_task_heading',
+  'missing_task_how',
+  'missing_task_result',
+  'orphan_task_row',
+  'unknown_nonblank_row',
+  'footer_structure_drift',
+]);
+
+function hasUnsafeScopeAlignment(scope) {
+  return scope.findings.some((finding) => SCOPE_ALIGNMENT_FINDINGS.has(finding.type));
+}
+
 function stableFindingId(finding) {
   const identity = Object.fromEntries(Object.entries(finding).filter(([key]) => !['severity', 'message', 'accepted', 'finding_id'].includes(key)));
   return `${finding.type}:${sha256(identity).slice(0, 16)}`;
@@ -241,6 +415,11 @@ export function auditSheetChanges(baselinePayload, currentPayload, { acceptedFin
   const expectedHeader = baselineRows[0];
   const actualHeader = currentRows[0];
   if (!actualHeader || COLUMNS.some((column) => expectedHeader[column] !== actualHeader[column])) findings.push(issue('header_drift', 'blocker', '表头与 Stage A 基线不一致'));
+  const baselineBoundary = evidenceBoundary(baselinePayload);
+  const currentBoundary = evidenceBoundary(currentPayload);
+  for (const key of ['document_id', 'sheet_id', 'sheet_name', 'report_date']) {
+    if (baselineBoundary[key] && currentBoundary[key] && baselineBoundary[key] !== currentBoundary[key]) findings.push(issue('snapshot_identity_mismatch', 'blocker', `${key} 与 Stage A 基线不一致`, { key, before: baselineBoundary[key], after: currentBoundary[key] }));
+  }
   const baseline = parseScopes(baselineRows);
   const current = parseScopes(currentRows);
   findings.push(...current.findings);
@@ -265,7 +444,7 @@ export function auditSheetChanges(baselinePayload, currentPayload, { acceptedFin
   for (const scope of current.scopes) {
     const before = baselineMap.get(scope.identity);
     if (!before) findings.push(issue('added_or_identity_changed_scope', 'confirm', `当前范围“${scope.A} / ${scope.B}”为新增或身份已改变`, { scope: scope.identity }));
-    else {
+    else if (!hasUnsafeScopeAlignment(scope)) {
       const compared = compareScope(before, scope);
       findings.push(...compared.findings);
       modifications.push(...compared.modifications);
@@ -275,22 +454,56 @@ export function auditSheetChanges(baselinePayload, currentPayload, { acceptedFin
   const baselineOrder = baseline.scopes.map((scope) => scope.identity).filter((identity) => currentMap.has(identity));
   const currentOrder = current.scopes.map((scope) => scope.identity).filter((identity) => baselineMap.has(identity));
   if (!hasDuplicateScopes && JSON.stringify(baselineOrder) !== JSON.stringify(currentOrder)) findings.push(issue('scope_order_changed', 'confirm', '存续范围顺序发生变化', { before: baselineOrder, after: currentOrder }));
+  const restorationCandidates = exactPartialClearRepairs(baselineRows, currentRows, baseline, current);
+  for (const finding of findings) {
+    if (finding.type !== 'invalid_task_status' || !finding.cell) continue;
+    const before = rowCell(currentRows, finding.cell);
+    const after = rowCell(baselineRows, finding.cell);
+    if (text(after) && before !== after && !restorationCandidates.some((repair) => repair.cell === finding.cell)) {
+      restorationCandidates.push({ cell: finding.cell, semantic: finding.semantic ?? 'status', baseline_preimage: after, before, after, kind: 'restore', reason: '从本次 Stage A 精确基线恢复非法或缺失状态' });
+    }
+  }
+  const candidateByCell = new Map(restorationCandidates.map((candidate) => [candidate.cell, candidate]));
+  const represented = new Set();
+  const enrichedFindings = findings.map((finding) => {
+    const candidate = finding.cell ? candidateByCell.get(finding.cell) : undefined;
+    if (!candidate) return finding;
+    represented.add(candidate.cell);
+    return { ...finding, scope: candidate.scope ?? finding.scope, task: candidate.task ?? finding.task, baseline_preimage: candidate.baseline_preimage, repairs: [...(finding.repairs ?? []), Object.fromEntries(Object.entries(candidate).filter(([key]) => !['semantic', 'scope', 'task', 'baseline_preimage'].includes(key)))] };
+  });
+  for (const candidate of restorationCandidates) if (!represented.has(candidate.cell)) {
+    enrichedFindings.push(issue('partial_field_clear', 'blocker', `${candidate.cell} 的“${candidate.semantic}”相对 Stage A 基线被清空`, {
+      cell: candidate.cell, semantic: candidate.semantic, baseline_preimage: candidate.baseline_preimage,
+      scope: candidate.scope, task: candidate.task,
+      repairs: [Object.fromEntries(Object.entries(candidate).filter(([key]) => !['semantic', 'scope', 'task', 'baseline_preimage'].includes(key)))],
+    }));
+  }
   const accepted = new Set(acceptedFindingIds);
-  const finalizedFindings = findings.map((finding) => {
-    const findingId = stableFindingId(finding);
+  const baseFindingIds = enrichedFindings.map(stableFindingId);
+  const findingTotals = new Map(baseFindingIds.map((findingId) => [findingId, (baseFindingIds.filter((candidate) => candidate === findingId).length)]));
+  const findingOccurrences = new Map();
+  const finalizedFindings = enrichedFindings.map((finding, index) => {
+    const baseFindingId = baseFindingIds[index];
+    const occurrence = (findingOccurrences.get(baseFindingId) ?? 0) + 1;
+    findingOccurrences.set(baseFindingId, occurrence);
+    const findingId = findingTotals.get(baseFindingId) > 1 ? `${baseFindingId}:${occurrence}` : baseFindingId;
     return { ...finding, finding_id: findingId, accepted: finding.severity === 'confirm' && accepted.has(findingId) };
   });
   const blockers = finalizedFindings.filter((finding) => finding.severity === 'blocker');
   const confirmations = finalizedFindings.filter((finding) => finding.severity === 'confirm' && !finding.accepted);
   const acceptedConfirmations = finalizedFindings.filter((finding) => finding.severity === 'confirm' && finding.accepted);
   const repairs = finalizedFindings.filter((finding) => finding.severity === 'repair');
+  const suggestedRepairs = finalizedFindings.flatMap((finding) => (finding.repairs ?? []).map((repair) => ({ ...repair, finding_id: finding.finding_id, semantic: finding.semantic ?? repair.semantic })));
+  const suggestedRowRepairs = finalizedFindings.flatMap((finding) => finding.row_operation ? [{ ...finding.row_operation, finding_id: finding.finding_id }] : []);
   return {
     schema: AUDIT_SCHEMA,
     status: blockers.length ? 'BLOCKED' : confirmations.length ? 'REVIEW_REQUIRED' : repairs.length ? 'REPAIR_REQUIRED' : 'PASS',
-    baseline_sha256: baselinePayload.snapshot_sha256 || sha256(baselineRows),
-    current_sha256: currentPayload.snapshot_sha256 || sha256(currentRows),
+    baseline_sha256: evidenceHash(baselinePayload, baselineRows),
+    current_sha256: evidenceHash(currentPayload, currentRows),
+    baseline_boundary: baselineBoundary,
+    current_boundary: currentBoundary,
     summary: { scopes: current.scopes.length, ordinary_modifications: modifications.length, blockers: blockers.length, confirmations: confirmations.length, accepted_confirmations: acceptedConfirmations.length, deterministic_repairs: repairs.length },
-    user_modifications: modifications, accepted_confirmations: acceptedConfirmations, findings: finalizedFindings,
+    user_modifications: modifications, accepted_confirmations: acceptedConfirmations, suggested_repairs: suggestedRepairs, suggested_row_repairs: suggestedRowRepairs, findings: finalizedFindings,
     next_action: blockers.length ? 'restore-or-decide-before-prepare' : confirmations.length ? 'confirm-intent-before-repair' : repairs.length ? 'apply-deterministic-repairs-to-sheet' : 'safe-to-run-converter',
   };
 }

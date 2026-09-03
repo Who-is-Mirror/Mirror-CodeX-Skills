@@ -78,10 +78,12 @@ test('confirmed physical task deletion converges to PASS only after compaction a
   const first = auditSheetChanges(baseline(), current(edited));
   assert.equal(first.status, 'REVIEW_REQUIRED');
   const deletion = first.findings.find((finding) => finding.type === 'missing_task');
+  const consistency = first.findings.find((finding) => finding.type === 'dependent_consistency_review');
   assert.ok(deletion?.finding_id);
-  const confirmed = auditSheetChanges(baseline(), current(edited), { acceptedFindingIds: [deletion.finding_id] });
+  assert.equal(consistency.cells.length, 5);
+  const confirmed = auditSheetChanges(baseline(), current(edited), { acceptedFindingIds: [deletion.finding_id, consistency.finding_id] });
   assert.equal(confirmed.status, 'PASS');
-  assert.equal(confirmed.summary.accepted_confirmations, 1);
+  assert.equal(confirmed.summary.accepted_confirmations, 2);
 });
 
 test('task movement and duplicate paste require explicit confirmation', () => {
@@ -98,6 +100,19 @@ test('task movement and duplicate paste require explicit confirmation', () => {
   duplicated[9][2] = '3. 第一项';
   const duplicateAudit = auditSheetChanges(baseline(), current(duplicated));
   assert.ok(duplicateAudit.findings.some((finding) => finding.type === 'duplicate_task'));
+});
+
+test('duplicate confirmation findings receive distinct IDs and are accepted independently', () => {
+  const duplicated = structuredClone(rows);
+  const newTask = [['', '', '3. 重复新增', '做了什么', '- 做', ''], ['', '', '', '怎么做的', '- 方法', ''], ['', '', '', '结果', '- 结果', '已完成']];
+  duplicated.splice(9, 0, ...structuredClone(newTask), ...structuredClone(newTask));
+  duplicated[12][2] = '4. 重复新增';
+  const first = auditSheetChanges(baseline(), current(duplicated));
+  const additions = first.findings.filter((finding) => finding.type === 'added_or_renamed_task' && finding.task === '重复新增');
+  assert.equal(additions.length, 2);
+  assert.equal(new Set(additions.map((finding) => finding.finding_id)).size, 2);
+  const accepted = auditSheetChanges(baseline(), current(duplicated), { acceptedFindingIds: [additions[0].finding_id] });
+  assert.equal(accepted.findings.filter((finding) => finding.type === 'added_or_renamed_task' && finding.accepted).length, 1);
 });
 
 test('a decision ledger cannot suppress blockers', () => {
@@ -118,6 +133,11 @@ test('cleared required prose blocks and is not mislabeled as an ordinary edit', 
     assert.equal(audit.status, 'BLOCKED', semantic);
     assert.ok(audit.findings.some((finding) => finding.type === 'missing_required_content' && finding.semantic === semantic));
     assert.ok(!audit.user_modifications.some((item) => item.semantic === semantic));
+    const repair = audit.suggested_repairs.find((item) => item.semantic === semantic);
+    assert.equal(repair.cell, `E${rowIndex + 1}`);
+    assert.equal(repair.before, '');
+    assert.equal(repair.after, rows[rowIndex][4]);
+    assert.ok(repair.finding_id);
   }
 });
 
@@ -143,7 +163,14 @@ test('scope separator count and scope order are audited', () => {
   const base = { schema: 'daily-sheet-rows-v1', grid_data: { values: baseValues } };
 
   const noSeparator = [...structuredClone(rows), ...structuredClone(secondScope)];
-  assert.equal(auditSheetChanges(base, current(noSeparator)).status, 'REPAIR_REQUIRED');
+  const missingAudit = auditSheetChanges(base, current(noSeparator));
+  assert.equal(missingAudit.status, 'REPAIR_REQUIRED');
+  assert.deepEqual(missingAudit.suggested_row_repairs.map((operation) => operation.action), ['insert']);
+
+  const duplicateSeparator = [...structuredClone(rows), ['', '', '', '', '', ''], ['', '', '', '', '', ''], ...structuredClone(secondScope)];
+  const duplicateAudit = auditSheetChanges(base, current(duplicateSeparator));
+  assert.equal(duplicateAudit.status, 'REPAIR_REQUIRED');
+  assert.deepEqual(duplicateAudit.suggested_row_repairs.map((operation) => operation.action), ['delete']);
 
   const moved = [structuredClone(rows[0]), ...structuredClone(secondScope), ['', '', '', '', '', ''], ...structuredClone(rows.slice(1))];
   const movedAudit = auditSheetChanges(base, current(moved));
@@ -192,4 +219,65 @@ test('decision ledger is bound to exact baseline and current hashes', () => {
   const ledger = { schema: DECISIONS_SCHEMA, baseline_sha256: audit.baseline_sha256, current_sha256: audit.current_sha256, accepted_finding_ids: [findingId] };
   assert.deepEqual(validateDecisionLedger(ledger, audit), [findingId]);
   assert.throws(() => validateDecisionLedger({ ...ledger, current_sha256: 'stale' }, audit), /STALE_DECISION_LEDGER/);
+});
+
+test('declared snapshot hash cannot hide changed row content', () => {
+  const before = { schema: 'android-daily-sheet-snapshot-v2', snapshot_sha256: 'same-declared-value', ...current(structuredClone(rows)) };
+  const changedRows = structuredClone(rows);
+  changedRows[1][4] = '- 修改后的主题';
+  const after = { schema: 'android-daily-sheet-snapshot-v2', snapshot_sha256: 'same-declared-value', ...current(changedRows) };
+  const first = auditSheetChanges(before, before);
+  const second = auditSheetChanges(before, after);
+  assert.notEqual(first.current_sha256, second.current_sha256);
+});
+
+test('same rows on a different dated sheet cannot reuse a decision ledger', () => {
+  const before = { schema: 'android-daily-sheet-snapshot-v2', document_id: 'doc-1', sheet_id: 'sheet-a', sheet_name: '2026-09-03', ...current(structuredClone(rows)) };
+  const after = { ...before, sheet_id: 'sheet-b', sheet_name: '2026-09-04' };
+  const first = auditSheetChanges(before, before);
+  const second = auditSheetChanges(after, after);
+  assert.notEqual(first.current_sha256, second.current_sha256);
+  assert.equal(auditSheetChanges(before, after).status, 'BLOCKED');
+});
+
+test('partial structural label clear carries exact baseline restoration but a complete task clear does not', () => {
+  const partial = structuredClone(rows);
+  partial[4][3] = '';
+  const partialAudit = auditSheetChanges(baseline(), current(partial));
+  assert.ok(partialAudit.suggested_repairs.some((repair) => repair.cell === 'D5' && repair.after === '怎么做的'));
+
+  const complete = structuredClone(rows);
+  for (let index = 3; index <= 5; index += 1) complete[index] = ['', '', '', '', '', ''];
+  const completeAudit = auditSheetChanges(baseline(), current(complete));
+  assert.ok(!completeAudit.suggested_repairs.some((repair) => ['C4', 'D4', 'E4', 'D5', 'E5', 'D6', 'E6', 'F6'].includes(repair.cell)));
+});
+
+test('confirmed task deletion still blocks when unchanged summary text names the deleted task', () => {
+  const named = structuredClone(rows);
+  named[1][4] = '- 第一项与第二项联调';
+  const base = { schema: 'daily-sheet-rows-v1', grid_data: { values: structuredClone(named) } };
+  named.splice(3, 3);
+  named[3][2] = '1. 第二项';
+  const first = auditSheetChanges(base, current(named));
+  const deletion = first.findings.find((finding) => finding.type === 'missing_task');
+  const accepted = auditSheetChanges(base, current(named), { acceptedFindingIds: [deletion.finding_id] });
+  assert.equal(accepted.status, 'BLOCKED');
+  assert.ok(accepted.findings.some((finding) => finding.type === 'stale_summary_after_task_deletion' && finding.cells.some((cell) => cell.cell === 'E2')));
+});
+
+test('damaged later scope start cannot misattribute its footer as an earlier scope edit', () => {
+  const second = structuredClone(rows.slice(1));
+  second[0][1] = '第二范围';
+  second[8][4] = '- 第二范围重点';
+  second[9][4] = '- 第二范围依赖';
+  const values = [...structuredClone(rows), ['', '', '', '', '', ''], ...second];
+  const base = { schema: 'daily-sheet-rows-v1', grid_data: { values } };
+
+  for (const columnIndex of [2, 3]) {
+    const edited = structuredClone(values);
+    edited[13][columnIndex] = '';
+    const audit = auditSheetChanges(base, current(edited));
+    assert.equal(audit.status, 'BLOCKED');
+    assert.deepEqual(audit.user_modifications, []);
+  }
 });
