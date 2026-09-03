@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 
-import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { createRequire } from 'node:module';
+import { disconnectPlaywrightTransport, loadPlaywrightRuntime } from './playwright_runtime.mjs';
 
 const DEFAULT_CDP = 'http://127.0.0.1:9223';
 
@@ -18,21 +16,6 @@ function parseArgs(argv) {
   return result;
 }
 
-async function loadPlaywright() {
-  const configured = process.env.CODEX_PLAYWRIGHT_MODULE;
-  if (configured) return import(pathToFileURL(resolve(configured)).href);
-  try {
-    const requireFromCwd = createRequire(resolve(process.cwd(), 'package.json'));
-    return import(pathToFileURL(requireFromCwd.resolve('playwright')).href);
-  } catch {
-    return import('playwright');
-  }
-}
-
-async function disconnect(browser) {
-  try { await browser?._connection?.close?.(); } catch {}
-}
-
 async function lastVisible(locator) {
   const candidates = await locator.all();
   for (let index = candidates.length - 1; index >= 0; index -= 1) {
@@ -42,7 +25,7 @@ async function lastVisible(locator) {
 }
 
 const options = parseArgs(process.argv.slice(2));
-const { chromium } = await loadPlaywright();
+const { chromium } = await loadPlaywrightRuntime();
 const browser = await chromium.connectOverCDP(options.cdp || DEFAULT_CDP);
 try {
   const contexts = browser.contexts();
@@ -73,6 +56,6 @@ try {
   if (options.reference_document_id && documentId === options.reference_document_id) throw new Error('新表格 document ID 与旧模板相同，拒绝继续');
   process.stdout.write(`${JSON.stringify({ status: 'PASS', document_id: documentId, url: page.url() }, null, 2)}\n`);
 } finally {
-  await disconnect(browser);
+  await disconnectPlaywrightTransport(browser);
 }
 process.exit(0);

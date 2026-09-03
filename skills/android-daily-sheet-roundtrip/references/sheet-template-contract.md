@@ -27,13 +27,15 @@ The canonical editable-sheet template is `assets/daily-sheet-template.json`. It 
 - `text/html` is the formatting representation. It must carry exact column widths, header fill, alignment, bold, wrap, explicit `<br>` line breaks, and `colspan="3"` for every D:F footer merge.
 - Derive footer, separator, scope and field rows from the current values; do not reuse the fake asset's row numbers for a differently sized real report.
 - The renderer must snapshot and restore the clipboard. Clipboard restoration failure is not a successful Stage A completion.
-- Activate only the target CDP tab and dispatch one Playwright `Control+V`; never drive the user's system pointer or foreground the Edge window at the OS level.
+- Activate only the target CDP tab and dispatch Playwright `Control+V`. Use bounded retries only: rewrite the same dual-MIME payload and reselect A1 once, then invoke the verified enterprise WeChat paste action once if still blank. When that loader is capability-gated and the workbook model remains blank, invoke the same loaded module's bottom `apiDoPaste` batch entry once. If the model remains blank after the dimension batch, repeat the ordinary dual-MIME A1 paste once and reapply dimensions before the final audit. Never drive the user's system pointer or foreground the Edge window at the OS level.
 - HTML row heights are advisory because enterprise WeChat does not preserve them reliably during paste. Apply calculated row heights and fixed column widths through one verified workbook-dimension batch after the paste.
 - Validate the generated TSV/HTML structure before dispatch, then verify resulting values, styles, merges and dimensions from the workbook model. Avoid screenshot pixel analysis and per-row context-menu coordinates.
 
 ## Safety
 
-- A generated workbook must have a new document ID when the user requests a new workbook. The old workbook may be read as a reference but must not be renamed, cleared, or used as the output.
+- Ordinary runs reuse one registered managed workbook. Create a new document ID only for first setup or an explicit managed-workbook reset.
+- Keep at most five unique `YYYY-MM-DD` worksheets ordered newest to oldest. Below five, add a blank date worksheet. At five, delete only the uniquely identified oldest date before adding the new one. Replacing an existing target date requires explicit regeneration authorization.
+- Reject non-date worksheets, duplicate dates, ambiguous deletion targets or unverifiable order. A fresh blank workbook may bootstrap by renaming its sole empty default worksheet.
 - Before writing, reject any template asset containing a `forbidden_real_markers` token.
 - After writing, read every A:F cell back, compare normalized values, verify required merges/wrap state where the UI exposes stable state, and capture screenshots.
 - Attach only to the existing background Edge CDP session and disconnect the transport without closing Edge.

@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createRequire } from 'node:module';
+import { loadPlaywrightRuntime } from './playwright_runtime.mjs';
 
 export const FACTS_SCHEMA = 'akbs-daily-work-facts-v4';
 export const ALLOWED_STATUSES = new Set(['已完成', '处理中', '待验证', '阻塞']);
@@ -559,27 +559,6 @@ async function disconnectWithoutClosingBrowser(browser) {
   }
 }
 
-async function loadBundledPlaywright() {
-  const configured = normalizeText(process.env.CODEX_PLAYWRIGHT_MODULE);
-  if (configured) {
-    try {
-      return await import(pathToFileURL(resolve(configured)).href);
-    } catch (error) {
-      fail(`无法加载 CODEX_PLAYWRIGHT_MODULE 指定的 bundled Playwright: ${error.message}`);
-    }
-  }
-  try {
-    const requireFromCwd = createRequire(resolve(process.cwd(), 'package.json'));
-    return await import(pathToFileURL(requireFromCwd.resolve('playwright')).href);
-  } catch {
-    try {
-      return await import('playwright');
-    } catch {
-      fail('未找到 bundled Playwright；请通过桌面 workspace dependencies 设置 CODEX_PLAYWRIGHT_MODULE');
-    }
-  }
-}
-
 export async function readCellsOverCdp({
   cdpUrl,
   sheetName,
@@ -594,7 +573,7 @@ export async function readCellsOverCdp({
     if (!Number.isInteger(value) || value <= 0) fail(`${name} 必须是正整数`);
   }
 
-  const { chromium } = await loadBundledPlaywright();
+  const { chromium } = await loadPlaywrightRuntime();
   const browser = await chromium.connectOverCDP(cdpUrl, { timeout: timeoutMs });
   try {
     let selectedPage = null;

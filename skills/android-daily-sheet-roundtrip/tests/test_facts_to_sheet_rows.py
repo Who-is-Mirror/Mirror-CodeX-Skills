@@ -142,17 +142,35 @@ class FactsToRowsTests(unittest.TestCase):
         with self.assertRaisesRegex(rows_module.RowsError, "GMS.*不能无损映射"):
             rows_module.convert_facts_to_rows(facts)
 
-    def test_draft_unresolved_refuses_rows(self):
+    def test_automatic_draft_or_candidate_always_refuses_rows(self):
         facts = base_facts()
         facts["projects"] = [project("Patch")]
-        envelope = {
-            "schema": rows_module.DRAFT_SCHEMA,
-            "plugin_version": "1.0.168",
-            "facts": facts,
-            "unresolved": [{"code": "missing_customer"}],
-        }
-        with self.assertRaisesRegex(rows_module.RowsError, "含 unresolved"):
-            rows_module.convert_facts_to_rows(envelope)
+        for schema in (rows_module.DRAFT_SCHEMA, rows_module.CANDIDATE_SCHEMA, rows_module.TASK_EVIDENCE_SCHEMA):
+            envelope = {
+                "schema": schema,
+                "plugin_version": "1.0.168",
+                "facts": facts,
+                "unresolved": [],
+            }
+            with self.assertRaisesRegex(rows_module.RowsError, "自动会话候选"):
+                rows_module.convert_facts_to_rows(envelope)
+
+    def test_path_placeholders_and_absolute_paths_refuse_rows(self):
+        for unsafe in ("核对 [PATH] 下的实现", "检查 <workspace_root> 内容", "读取 /home/mirror/work/file"):
+            facts = base_facts()
+            scope = project("Patch")
+            scope["work_items"][0]["did"] = [unsafe]
+            facts["projects"] = [scope]
+            with self.assertRaisesRegex(rows_module.RowsError, "路径"):
+                rows_module.convert_facts_to_rows(facts)
+
+    def test_generic_fallback_prose_refuses_rows(self):
+        facts = base_facts()
+        scope = project("Patch")
+        scope["work_items"][0]["how"] = ["修改或适配相关实现"]
+        facts["projects"] = [scope]
+        with self.assertRaisesRegex(rows_module.RowsError, "通用兜底"):
+            rows_module.convert_facts_to_rows(facts)
 
     def test_does_not_mutate_input_and_is_deterministic(self):
         facts = base_facts()
@@ -162,6 +180,7 @@ class FactsToRowsTests(unittest.TestCase):
         second = rows_module.convert_facts_to_rows(facts)
         self.assertEqual(facts, original)
         self.assertEqual(first, second)
+        self.assertEqual(len(first["source_facts_sha256"]), 64)
 
 
 if __name__ == "__main__":

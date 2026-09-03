@@ -197,6 +197,9 @@ class DraftDailyTests(unittest.TestCase):
             api_loader=lambda **_kwargs: api,
         )
         self.assertEqual(envelope["plugin_version"], "9.9.9-fixture")
+        self.assertEqual(envelope["schema"], draft.CANDIDATE_SCHEMA)
+        self.assertFalse(envelope["authoritative"])
+        self.assertTrue(envelope["requires_semantic_session_review"])
         self.assertEqual(envelope["session_count"]["raw_parsed"], 2)
         self.assertEqual(envelope["session_count"]["unique_session_ids"], 1)
         self.assertNotIn("discover_patches", calls)

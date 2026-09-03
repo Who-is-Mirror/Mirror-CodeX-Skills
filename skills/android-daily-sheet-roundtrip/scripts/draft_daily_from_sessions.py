@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a privacy-minimized Stage A daily draft with the current intake plugin APIs."""
+"""Build a privacy-minimized, non-authoritative session candidate diagnostic."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from typing import Any, Callable
 sys.dont_write_bytecode = True
 
 
-DRAFT_SCHEMA = "codex-daily-sheet-draft-v1"
+CANDIDATE_SCHEMA = "codex-daily-session-candidates-v1"
 FACTS_SCHEMA = "akbs-daily-work-facts-v4"
 SESSION_FIELDS = ["work_summary", "command_summary", "project_hint", "work_scope_hint"]
 GMS_REQUIRED_CURRENT_FIELDS = (
@@ -391,7 +391,10 @@ def build_draft(
         warnings.append("parse_sessions 返回重复 session_id；计数已说明，归并仍由 current plugin 负责")
     warnings.append("未读取或学习客户 registry；Stage B customer guard 保持权威")
     envelope = {
-        "schema": DRAFT_SCHEMA,
+        "schema": CANDIDATE_SCHEMA,
+        "pipeline_role": "candidate_only_not_report_facts",
+        "authoritative": False,
+        "requires_semantic_session_review": True,
         "plugin_version": api.version,
         "report_date": report_date.isoformat(),
         "session_count": {
@@ -429,7 +432,7 @@ def write_json_idempotent(path: Path, payload: dict[str, Any]) -> bool:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate a Stage A daily sheet draft from current plugin APIs")
+    parser = argparse.ArgumentParser(description="Generate a non-authoritative daily session candidate diagnostic")
     parser.add_argument("--profile", required=True, help="case-sensitive profile name from report config")
     parser.add_argument("--date", required=True, help="report date YYYY-MM-DD")
     parser.add_argument("--session-consent", action="store_true", help="fresh consent for this exact run/date")
@@ -449,7 +452,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     changed = write_json_idempotent(Path(args.output), draft)
     print(json.dumps({
-        "status": "PASS" if not draft["unresolved"] else "UNRESOLVED",
+        "status": "CANDIDATES" if not draft["unresolved"] else "UNRESOLVED",
         "output": str(Path(args.output).expanduser().resolve()),
         "written": changed,
         "plugin_version": draft["plugin_version"],

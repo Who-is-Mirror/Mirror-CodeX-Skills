@@ -2,9 +2,9 @@
 
 import { mkdir, readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { validateTemplate } from './sheet_template.mjs';
+import { disconnectPlaywrightTransport, loadPlaywrightRuntime } from './playwright_runtime.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const template = validateTemplate(JSON.parse(await readFile(resolve(root, 'assets', 'daily-sheet-template.json'), 'utf8')));
@@ -14,23 +14,13 @@ const args = Object.fromEntries(process.argv.slice(2).reduce((pairs, value, inde
 }, []));
 if (!args.document_id || !args.output_dir) throw new Error('需要 --document-id 和 --output-dir');
 
-async function loadPlaywright() {
-  if (process.env.CODEX_PLAYWRIGHT_MODULE) return import(pathToFileURL(resolve(process.env.CODEX_PLAYWRIGHT_MODULE)).href);
-  try {
-    const requireFromCwd = createRequire(resolve(process.cwd(), 'package.json'));
-    return import(pathToFileURL(requireFromCwd.resolve('playwright')).href);
-  } catch {
-    return import('playwright');
-  }
-}
-async function disconnect(browser) { try { await browser?._connection?.close?.(); } catch {} }
 async function visibleButton(page, name) {
   const candidates = await page.getByRole('button', { name, exact: true }).all();
   for (let index = candidates.length - 1; index >= 0; index -= 1) if (await candidates[index].isVisible().catch(() => false)) return candidates[index];
   return null;
 }
 
-const { chromium } = await loadPlaywright();
+const { chromium } = await loadPlaywrightRuntime();
 const browser = await chromium.connectOverCDP(args.cdp || 'http://127.0.0.1:9223');
 try {
   const pages = browser.contexts().flatMap((context) => context.pages()).filter((page) => page.url().includes(`/sheet/${args.document_id}`));
@@ -84,6 +74,6 @@ try {
   }
   process.stdout.write(`${JSON.stringify({ status: 'PASS', document_id: args.document_id, wrap_checks: checks, screenshots }, null, 2)}\n`);
 } finally {
-  await disconnect(browser);
+  await disconnectPlaywrightTransport(browser);
 }
 process.exit(0);

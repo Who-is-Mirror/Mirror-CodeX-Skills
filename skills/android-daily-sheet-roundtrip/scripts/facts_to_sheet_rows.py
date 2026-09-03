@@ -1,22 +1,29 @@
 #!/usr/bin/env python3
-"""Convert a clean Stage A draft or v4 daily facts to deterministic A:F sheet rows."""
+"""Convert semantically reviewed v4 daily facts to deterministic A:F sheet rows."""
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
 
 
 DRAFT_SCHEMA = "codex-daily-sheet-draft-v1"
+CANDIDATE_SCHEMA = "codex-daily-session-candidates-v1"
+TASK_EVIDENCE_SCHEMA = "android-daily-task-evidence-v1"
 FACTS_SCHEMA = "akbs-daily-work-facts-v4"
 ROWS_SCHEMA = "daily-sheet-rows-v1"
 HEADER = ["项目 / 客户", "类型", "任务", "分项", "内容", "状态"]
 COLUMNS = ("A", "B", "C", "D", "E", "F")
 ALLOWED_STATUSES = {"已完成", "处理中", "待验证", "阻塞"}
 PROJECT_TYPES = {"Patch", "App", "GMS", "Doc", "Other"}
+FORBIDDEN_VISIBLE_MARKERS = ("[PATH]", "<workspace_", "<cwd>", "<source_path>")
+GENERIC_FILLER_MARKERS = ("修改或适配相关实现",)
+ABSOLUTE_PATH_RE = re.compile(r"(?:^|\s)(?:/[A-Za-z0-9_.-]+/|[A-Za-z]:[\\/])")
 
 
 class RowsError(RuntimeError):
@@ -66,21 +73,34 @@ def unwrap(payload: Any) -> tuple[dict[str, Any], str]:
     if not isinstance(payload, dict):
         fail("输入必须是 JSON 对象")
     schema = payload.get("schema")
-    if schema == DRAFT_SCHEMA:
-        unresolved = payload.get("unresolved")
-        if not isinstance(unresolved, list):
-            fail("draft.unresolved 必须是数组")
-        if unresolved:
-            fail("draft 含 unresolved，拒绝生成 rows 或写表")
-        facts = payload.get("facts")
-        if not isinstance(facts, dict):
-            fail("draft.facts 必须是对象")
-        return facts, str(payload.get("plugin_version") or "")
+    if schema in {DRAFT_SCHEMA, CANDIDATE_SCHEMA, TASK_EVIDENCE_SCHEMA}:
+        fail("自动会话候选不是语义复核后的日报 facts，拒绝生成 rows 或写表")
     if schema == FACTS_SCHEMA:
         if payload.get("unresolved"):
             fail("facts 含 unresolved，拒绝生成 rows 或写表")
         return payload, ""
-    fail(f"输入 schema 必须是 {DRAFT_SCHEMA} 或 {FACTS_SCHEMA}")
+    fail(f"输入 schema 必须是语义复核后的 {FACTS_SCHEMA}")
+
+
+def assert_display_safe(value: Any, *, label: str = "facts") -> None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            assert_display_safe(child, label=f"{label}.{key}")
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            assert_display_safe(child, label=f"{label}[{index}]")
+    elif isinstance(value, str):
+        if any(marker.casefold() in value.casefold() for marker in FORBIDDEN_VISIBLE_MARKERS):
+            fail(f"{label} 含禁止的路径占位符")
+        if any(marker in value for marker in GENERIC_FILLER_MARKERS):
+            fail(f"{label} 含无证据的通用兜底描述")
+        if ABSOLUTE_PATH_RE.search(value):
+            fail(f"{label} 含禁止的原始绝对路径")
+
+
+def facts_sha256(facts: dict[str, Any]) -> str:
+    canonical = json.dumps(facts, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def project_key(scope: dict[str, Any]) -> tuple[str, ...]:
@@ -226,6 +246,7 @@ def convert_facts_to_rows(payload: Any) -> dict[str, Any]:
     facts, plugin_version = unwrap(payload)
     if facts.get("schema") != FACTS_SCHEMA:
         fail(f"facts.schema 必须是 {FACTS_SCHEMA}")
+    assert_display_safe(facts)
     report_date = require_text(facts.get("report_date"), "report_date")
     plans = plan_map(facts)
     all_rows: list[dict[str, str]] = []
@@ -262,6 +283,7 @@ def convert_facts_to_rows(payload: Any) -> dict[str, Any]:
     return {
         "schema": ROWS_SCHEMA,
         "report_date": report_date,
+        "source_facts_sha256": facts_sha256(facts),
         "source_plugin_version": plugin_version,
         "header": HEADER,
         "rows": all_rows,
@@ -302,8 +324,8 @@ def write_json_idempotent(path: Path, payload: dict[str, Any]) -> bool:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Convert daily draft/facts to A:F sheet rows")
-    parser.add_argument("--input", required=True, help="draft envelope or v4 facts JSON")
+    parser = argparse.ArgumentParser(description="Convert semantically reviewed v4 daily facts to A:F sheet rows")
+    parser.add_argument("--input", required=True, help="reviewed akbs-daily-work-facts-v4 JSON")
     parser.add_argument("--output", required=True, help="new or identical rows JSON path")
     return parser.parse_args(argv)
 
