@@ -1,0 +1,4 @@
+interface:
+  display_name: "绩效任务填报"
+  short_description: "以周报为主生成绩效草稿，用户确认后再填写月度绩效系统"
+  default_prompt: "使用 $performance-task-entry 先生成本月绩效草稿供我检查，等我确认后再填写绩效系统。"

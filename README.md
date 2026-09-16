@@ -17,16 +17,34 @@ Android 日报双阶段工作流：
 
 技能目录：[`skills/android-daily-sheet-roundtrip`](skills/android-daily-sheet-roundtrip)
 
+### performance-task-entry
+
+月度绩效双阶段工作流：
+
+1. 以周报为主、日报为辅生成结构化绩效草稿，交付 Markdown 和 JSON 供用户检查。
+2. 用户再次确认后，通过专用后台 Edge 和 Playwright 将确认版本保存为绩效系统待提交记录；不会点击“提交审核”。
+
+浏览器默认由 Edge 通过 `--remote-debugging-port=0` 自动分配 CDP 端口，
+流程校验专用用户目录、根进程、监听 PID 和 WebSocket endpoint 后才连接，
+无需开启日常 Edge 的浏览器调试设置。
+
+技能目录：[`skills/performance-task-entry`](skills/performance-task-entry)
+
 ## 安装
 
 将需要的技能目录复制到 `$CODEX_HOME/skills/`：
 
 ```bash
 cp -R skills/android-daily-sheet-roundtrip "$CODEX_HOME/skills/"
+cp -R skills/performance-task-entry "$CODEX_HOME/skills/"
 ```
 
 该技能依赖已安装的 `android-framework-codex-suite` 插件、
 `android-daily-customer-guard` 技能，以及已开启 CDP 的用户自有 Edge 会话。
+
+`performance-task-entry` 需要 Node.js/npm、`playwright-cli`、Python 3、
+Python 包 `cryptography`、Windows Edge，以及可调用 Windows PowerShell 的 WSL 环境。
+账号密码由技能的本机加密凭据库管理，不包含在本仓库中。
 
 ## 校验
 
@@ -35,4 +53,10 @@ node --test skills/android-daily-sheet-roundtrip/tests/*.test.mjs
 python3 -m unittest discover \
   -s skills/android-daily-sheet-roundtrip/tests \
   -p 'test_*.py'
+
+python3 -m unittest discover \
+  -s skills/performance-task-entry/tests \
+  -p 'test_*.py'
+node --check skills/performance-task-entry/scripts/ensure_login.js
+node skills/performance-task-entry/tests/test_ensure_login_endpoint.js
 ```
