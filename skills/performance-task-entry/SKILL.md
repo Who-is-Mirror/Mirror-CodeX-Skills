@@ -29,7 +29,7 @@ description: 先以周报为主、日报为辅生成结构化绩效草稿供用�
 - `scripts/finalize_draft.py <work-draft.json> --output-dir <当前任务绝对路径>/outputs`：校验、生成完整审阅文档、归档、计算哈希，并在当前任务输出目录交付可直接查看的普通文件。
 - `scripts/fill_draft.py <archived-draft.json> --expected-sha256 <hash> --output-dir <absolute-output-dir>`：登录、查重、逐条填写、重试、截图、结果归档和断开。
 
-运行时路径由 `scripts/runtime_paths.py` 统一解析：默认从本技能的安装位置推导 Codex 目录、主来源归档 `$CODEX_HOME/artifacts/akbs-member-ops`、只读回退归档 `$CODEX_HOME/artifacts/android-knowledge-intake` 和草稿归档，并从该目录推导 Windows 用户目录。专用 Edge 默认用 `--remote-debugging-port=0` 自动分配端口，后续脚本只从该专用用户目录的 `DevToolsActivePort` 解析实际 endpoint；在 WSL 中优先读取直接挂载路径，遇到 Codex 桌面包文件系统重定向时通过 PowerShell 读取同一 Windows 逻辑路径。复用前先确认该目录只有一个根浏览器进程，再校验调试模式，以及实际 `127.0.0.1` 连接对应的全部监听 PID；`::1` 监听不能证明 IPv4 端点归属。需要共享归档、非标准安装或受控排障固定端口时，只在本次命令环境显式设置覆盖变量；完整变量和浏览器默认值见[后台浏览器与页面流程](references/site-workflow.md)。`doctor.py` 会输出已解析的非敏感配置、双来源根和可用的成员身份，凭据内容不会输出。
+运行时路径由 `scripts/runtime_paths.py` 统一解析：默认从本技能的安装位置推导 Codex 目录、主来源归档 `$CODEX_HOME/artifacts/akbs-member-ops`、只读回退归档 `$CODEX_HOME/artifacts/android-knowledge-intake` 和草稿归档，并从该目录推导 Windows 用户目录。浏览器连接由必须单独安装的 `edge-cdp-session` 技能统一管理；本技能的 `ensure_background_edge.py` 只是兼容适配器，并把原有 `EdgeBackgroundProfile` 传给共享技能以保留既有登录状态。共享技能负责 `--remote-debugging-port=0`、`DevToolsActivePort` 读取、唯一根进程、IPv4 监听 PID 和 endpoint 校验。本技能不得复制或绕过这些检查。需要共享归档、非标准安装或受控排障固定端口时，只在本次命令环境显式设置覆盖变量；完整变量和浏览器默认值见[后台浏览器与页面流程](references/site-workflow.md)。`doctor.py` 会输出已解析的非敏感配置、双来源根和可用的成员身份，凭据内容不会输出。
 
 ### 前置门禁
 

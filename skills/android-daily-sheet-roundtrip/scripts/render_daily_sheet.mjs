@@ -4,12 +4,11 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { disconnectPlaywrightTransport, loadPlaywrightRuntime } from './playwright_runtime.mjs';
+import { disconnectPlaywrightTransport, loadPlaywrightRuntime, resolveManagedCdpEndpoint } from './playwright_runtime.mjs';
 import { calculateRowHeights, expectedSheetCells, normalizeCell, validateTemplate, valuesFromInput } from './sheet_template.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ASSET = resolve(SCRIPT_DIR, '..', 'assets', 'daily-sheet-template.json');
-const DEFAULT_CDP = 'http://127.0.0.1:9223';
 
 function parseArgs(argv) {
   const result = {};
@@ -53,7 +52,7 @@ await mkdir(outputDir, { recursive: true });
 
 const { playwright: { chromium }, PNG } = await loadRuntime();
 if (!PNG) throw new Error('bundled runtime 缺少 pngjs，无法安全定位行头');
-const browser = await chromium.connectOverCDP(options.cdp || DEFAULT_CDP);
+const browser = await chromium.connectOverCDP(resolveManagedCdpEndpoint(options.cdp).endpoint);
 try {
   const matches = browser.contexts().flatMap((context) => context.pages()).filter((page) => page.url().includes(`/sheet/${options.document_id}`));
   if (matches.length !== 1) throw new Error(`目标新表格页面必须唯一，实际 ${matches.length}`);

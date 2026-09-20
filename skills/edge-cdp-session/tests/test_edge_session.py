@@ -19,15 +19,15 @@ from unittest.mock import patch
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-import ensure_background_edge
+import edge_session
 
 
 class RunPowerShellTest(unittest.TestCase):
     def test_direct_windows_execution_remains_the_primary_path(self) -> None:
         completed = subprocess.CompletedProcess([], 0, "", "")
 
-        with patch.object(ensure_background_edge.subprocess, "run", return_value=completed) as run:
-            result = ensure_background_edge.run_powershell("/mnt/c/powershell.exe", "command")
+        with patch.object(edge_session.subprocess, "run", return_value=completed) as run:
+            result = edge_session.run_powershell("/mnt/c/powershell.exe", "command")
 
         self.assertIs(result, completed)
         self.assertEqual(run.call_count, 1)
@@ -44,14 +44,14 @@ class RunPowerShellTest(unittest.TestCase):
         ]
 
         with (
-            patch.object(ensure_background_edge.os, "access", return_value=True),
+            patch.object(edge_session.os, "access", return_value=True),
             patch.object(
-                ensure_background_edge.subprocess,
+                edge_session.subprocess,
                 "run",
                 side_effect=[OSError(errno.ENOEXEC, "Exec format error"), completed],
             ) as run,
         ):
-            result = ensure_background_edge.run_powershell(direct[0], "command")
+            result = edge_session.run_powershell(direct[0], "command")
 
         self.assertIs(result, completed)
         self.assertEqual(run.call_args_list[0].args[0], direct)
@@ -59,12 +59,12 @@ class RunPowerShellTest(unittest.TestCase):
 
     def test_unrelated_os_error_is_not_hidden(self) -> None:
         with patch.object(
-            ensure_background_edge.subprocess,
+            edge_session.subprocess,
             "run",
             side_effect=OSError(errno.ENOENT, "missing"),
         ):
             with self.assertRaises(OSError):
-                ensure_background_edge.run_powershell("/mnt/c/powershell.exe", "command")
+                edge_session.run_powershell("/mnt/c/powershell.exe", "command")
 
 
 class DevToolsActivePortTest(unittest.TestCase):
@@ -76,10 +76,10 @@ class DevToolsActivePortTest(unittest.TestCase):
             profile = Path(temporary)
             (profile / "DevToolsActivePort").write_text(self.PAYLOAD, encoding="utf-8")
             with (
-                patch.object(ensure_background_edge, "profile_state_path", return_value=profile),
-                patch.object(ensure_background_edge, "run_powershell") as powershell,
+                patch.object(edge_session, "profile_state_path", return_value=profile),
+                patch.object(edge_session, "run_powershell") as powershell,
             ):
-                state = ensure_background_edge.read_devtools_active_port(
+                state = edge_session.read_devtools_active_port(
                     self.PROFILE, "powershell.exe"
                 )
 
@@ -90,13 +90,13 @@ class DevToolsActivePortTest(unittest.TestCase):
         completed = subprocess.CompletedProcess([], 0, self.PAYLOAD, "")
         with (
             patch.object(
-                ensure_background_edge,
+                edge_session,
                 "profile_state_path",
                 return_value=Path("/definitely/missing/profile"),
             ),
-            patch.object(ensure_background_edge, "run_powershell", return_value=completed) as run,
+            patch.object(edge_session, "run_powershell", return_value=completed) as run,
         ):
-            state = ensure_background_edge.read_devtools_active_port(
+            state = edge_session.read_devtools_active_port(
                 self.PROFILE, "powershell.exe"
             )
 
@@ -114,14 +114,14 @@ class DevToolsActivePortTest(unittest.TestCase):
             with (
                 self.subTest(completed=completed),
                 patch.object(
-                    ensure_background_edge,
+                    edge_session,
                     "profile_state_path",
                     return_value=Path("/definitely/missing/profile"),
                 ),
-                patch.object(ensure_background_edge, "run_powershell", return_value=completed),
+                patch.object(edge_session, "run_powershell", return_value=completed),
             ):
                 self.assertIsNone(
-                    ensure_background_edge.read_devtools_active_port(
+                    edge_session.read_devtools_active_port(
                         self.PROFILE, "powershell.exe"
                     )
                 )
@@ -133,10 +133,10 @@ class DevToolsActivePortTest(unittest.TestCase):
             state_file.write_text(self.PAYLOAD, encoding="utf-8")
             completed = subprocess.CompletedProcess([], 0, "1", "")
             with (
-                patch.object(ensure_background_edge, "profile_state_path", return_value=profile),
-                patch.object(ensure_background_edge, "run_powershell", return_value=completed) as run,
+                patch.object(edge_session, "profile_state_path", return_value=profile),
+                patch.object(edge_session, "run_powershell", return_value=completed) as run,
             ):
-                removed = ensure_background_edge.clear_devtools_active_port(
+                removed = edge_session.clear_devtools_active_port(
                     self.PROFILE, "powershell.exe"
                 )
 
@@ -147,19 +147,19 @@ class DevToolsActivePortTest(unittest.TestCase):
 
 class EndpointOwnershipTest(unittest.TestCase):
     @staticmethod
-    def process(pid: int, command_line: str, parent_pid: int = 10) -> ensure_background_edge.EdgeProcess:
-        return ensure_background_edge.EdgeProcess(pid, parent_pid, command_line)
+    def process(pid: int, command_line: str, parent_pid: int = 10) -> edge_session.EdgeProcess:
+        return edge_session.EdgeProcess(pid, parent_pid, command_line)
 
     def test_devtools_state_must_match_the_live_browser_endpoint(self) -> None:
         data = {"webSocketDebuggerUrl": "ws://127.0.0.1:43123/devtools/browser/fresh-id"}
         self.assertTrue(
-            ensure_background_edge.endpoint_matches_state(data, 43123, "/devtools/browser/fresh-id")
+            edge_session.endpoint_matches_state(data, 43123, "/devtools/browser/fresh-id")
         )
         self.assertFalse(
-            ensure_background_edge.endpoint_matches_state(data, 43123, "/devtools/browser/stale-id")
+            edge_session.endpoint_matches_state(data, 43123, "/devtools/browser/stale-id")
         )
         self.assertFalse(
-            ensure_background_edge.endpoint_matches_state(
+            edge_session.endpoint_matches_state(
                 {"webSocketDebuggerUrl": "ws://127.0.0.1:not-a-port/devtools/browser/fresh-id"},
                 43123,
                 "/devtools/browser/fresh-id",
@@ -177,15 +177,15 @@ class EndpointOwnershipTest(unittest.TestCase):
             {"OwningProcess": 100, "LocalAddress": "::1", "LocalPort": 43123},
         ])
         with patch.object(
-            ensure_background_edge,
+            edge_session,
             "run_powershell",
             side_effect=[
                 subprocess.CompletedProcess([], 0, process_metadata, ""),
                 subprocess.CompletedProcess([], 0, listener_metadata, ""),
             ],
         ) as run:
-            processes = ensure_background_edge.edge_processes("powershell.exe")
-            listener = ensure_background_edge.loopback_listener_owner("powershell.exe", 43123)
+            processes = edge_session.edge_processes("powershell.exe")
+            listener = edge_session.loopback_listener_owner("powershell.exe", 43123)
         self.assertEqual(processes, [self.process(100, "msedge.exe --remote-debugging-port=0")])
         self.assertEqual(listener, ("single", 100))
         self.assertIn("ProcessId,ParentProcessId,CommandLine", run.call_args_list[0].args[1])
@@ -205,14 +205,14 @@ class EndpointOwnershipTest(unittest.TestCase):
             '--remote-debugging-port=0 --user-data-dir="C:\\Users\\Mirror\\AppData\\Local\\Codex\\EdgeBackgroundProfile"'
         )
         self.assertTrue(
-            ensure_background_edge.dedicated_root_pid(
+            edge_session.dedicated_root_pid(
                 [self.process(100, root), self.process(101, renderer, 100), self.process(102, utility, 100)],
                 r"C:\Users\Mirror\AppData\Local\Codex\EdgeBackgroundProfile",
                 0,
             ) == 100
         )
         self.assertIsNone(
-            ensure_background_edge.dedicated_root_pid(
+            edge_session.dedicated_root_pid(
                 [self.process(100, root), self.process(200, root)],
                 r"C:\Users\Mirror\AppData\Local\Codex\EdgeBackgroundProfile",
                 0,
@@ -221,20 +221,21 @@ class EndpointOwnershipTest(unittest.TestCase):
 
     def test_stale_or_unowned_endpoint_is_not_resolved(self) -> None:
         config = SimpleNamespace(
+            session="performance-task-entry",
             edge_profile=r"C:\Users\Mirror\AppData\Local\Codex\EdgeBackgroundProfile",
             cdp_port=0,
             cdp_port_is_override=False,
         )
         with (
-            patch.object(ensure_background_edge, "read_devtools_active_port", return_value=(43123, "/devtools/browser/id")),
+            patch.object(edge_session, "read_devtools_active_port", return_value=(43123, "/devtools/browser/id")),
             patch.object(
-                ensure_background_edge,
+                edge_session,
                 "probe",
                 return_value={"webSocketDebuggerUrl": "ws://127.0.0.1:43123/devtools/browser/id"},
             ),
-            patch.object(ensure_background_edge, "loopback_listener_owner", return_value=("single", 999)),
+            patch.object(edge_session, "loopback_listener_owner", return_value=("single", 999)),
         ):
-            self.assertIsNone(ensure_background_edge.resolve_auto_endpoint("powershell.exe", config, []))
+            self.assertIsNone(edge_session.resolve_auto_endpoint("powershell.exe", config, []))
 
     def test_owned_fixed_override_reuses_live_endpoint_without_state_file(self) -> None:
         config = SimpleNamespace(
@@ -248,12 +249,12 @@ class EndpointOwnershipTest(unittest.TestCase):
         )
         data = {"webSocketDebuggerUrl": "ws://127.0.0.1:43123/devtools/browser/id"}
         with (
-            patch.object(ensure_background_edge, "read_devtools_active_port", return_value=None) as state,
-            patch.object(ensure_background_edge, "probe", return_value=data),
-            patch.object(ensure_background_edge, "loopback_listener_owner", return_value=("single", 100)),
+            patch.object(edge_session, "read_devtools_active_port", return_value=None) as state,
+            patch.object(edge_session, "probe", return_value=data),
+            patch.object(edge_session, "loopback_listener_owner", return_value=("single", 100)),
         ):
             self.assertEqual(
-                ensure_background_edge.resolve_fixed_endpoint(
+                edge_session.resolve_fixed_endpoint(
                     "powershell.exe", config, [self.process(100, root)]
                 ),
                 (data, "http://127.0.0.1:43123"),
@@ -268,16 +269,16 @@ class EndpointOwnershipTest(unittest.TestCase):
         )
         root = 'msedge.exe --remote-debugging-port=0 --user-data-dir="C:\\Users\\Mirror\\AppData\\Local\\Codex\\EdgeBackgroundProfile"'
         with (
-            patch.object(ensure_background_edge, "read_devtools_active_port", return_value=(43123, "/devtools/browser/id")),
+            patch.object(edge_session, "read_devtools_active_port", return_value=(43123, "/devtools/browser/id")),
             patch.object(
-                ensure_background_edge,
+                edge_session,
                 "probe",
                 return_value={"webSocketDebuggerUrl": "ws://127.0.0.1:43123/devtools/browser/id"},
             ) as probe,
-            patch.object(ensure_background_edge, "loopback_listener_owner", return_value=("single", 777)),
+            patch.object(edge_session, "loopback_listener_owner", return_value=("single", 777)),
         ):
             self.assertIsNone(
-                ensure_background_edge.resolve_auto_endpoint("powershell.exe", config, [self.process(100, root)])
+                edge_session.resolve_auto_endpoint("powershell.exe", config, [self.process(100, root)])
             )
         probe.assert_not_called()
 
@@ -290,12 +291,12 @@ class EndpointOwnershipTest(unittest.TestCase):
         root = 'msedge.exe --remote-debugging-port=0 --user-data-dir="C:\\Users\\Mirror\\AppData\\Local\\Codex\\EdgeBackgroundProfile"'
         data = {"webSocketDebuggerUrl": "ws://127.0.0.1:43123/devtools/browser/id"}
         with (
-            patch.object(ensure_background_edge, "read_devtools_active_port", return_value=(43123, "/devtools/browser/id")),
-            patch.object(ensure_background_edge, "probe", return_value=data),
-            patch.object(ensure_background_edge, "loopback_listener_owner", return_value=("single", 100)),
+            patch.object(edge_session, "read_devtools_active_port", return_value=(43123, "/devtools/browser/id")),
+            patch.object(edge_session, "probe", return_value=data),
+            patch.object(edge_session, "loopback_listener_owner", return_value=("single", 100)),
         ):
             self.assertEqual(
-                ensure_background_edge.resolve_auto_endpoint("powershell.exe", config, [self.process(100, root)]),
+                edge_session.resolve_auto_endpoint("powershell.exe", config, [self.process(100, root)]),
                 (data, "http://127.0.0.1:43123"),
             )
 
@@ -315,7 +316,7 @@ class StartupWaitTest(unittest.TestCase):
         def sleep(seconds: float) -> None:
             clock["now"] += seconds
 
-        root = ensure_background_edge.EdgeProcess(
+        root = edge_session.EdgeProcess(
             100,
             10,
             'msedge.exe --remote-debugging-port=0 '
@@ -327,16 +328,16 @@ class StartupWaitTest(unittest.TestCase):
         )
         with (
             patch.object(
-                ensure_background_edge,
+                edge_session,
                 "read_devtools_active_port",
                 side_effect=[None, None, (43123, "/devtools/browser/id")],
             ) as state,
-            patch.object(ensure_background_edge, "edge_processes", return_value=[root]) as processes,
-            patch.object(ensure_background_edge, "resolve_auto_endpoint", return_value=resolved) as resolve,
-            patch.object(ensure_background_edge.time, "monotonic", side_effect=lambda: clock["now"]),
-            patch.object(ensure_background_edge.time, "sleep", side_effect=sleep),
+            patch.object(edge_session, "edge_processes", return_value=[root]) as processes,
+            patch.object(edge_session, "resolve_auto_endpoint", return_value=resolved) as resolve,
+            patch.object(edge_session.time, "monotonic", side_effect=lambda: clock["now"]),
+            patch.object(edge_session.time, "sleep", side_effect=sleep),
         ):
-            current, phase, elapsed = ensure_background_edge.wait_for_started_endpoint(
+            current, phase, elapsed = edge_session.wait_for_started_endpoint(
                 "powershell.exe", self.config, timeout_seconds=2.0, poll_interval_seconds=0.25
             )
 
@@ -354,12 +355,12 @@ class StartupWaitTest(unittest.TestCase):
             clock["now"] += seconds
 
         with (
-            patch.object(ensure_background_edge, "read_devtools_active_port", return_value=None) as state,
-            patch.object(ensure_background_edge, "edge_processes") as processes,
-            patch.object(ensure_background_edge.time, "monotonic", side_effect=lambda: clock["now"]),
-            patch.object(ensure_background_edge.time, "sleep", side_effect=sleep),
+            patch.object(edge_session, "read_devtools_active_port", return_value=None) as state,
+            patch.object(edge_session, "edge_processes") as processes,
+            patch.object(edge_session.time, "monotonic", side_effect=lambda: clock["now"]),
+            patch.object(edge_session.time, "sleep", side_effect=sleep),
         ):
-            current, phase, elapsed = ensure_background_edge.wait_for_started_endpoint(
+            current, phase, elapsed = edge_session.wait_for_started_endpoint(
                 "powershell.exe", self.config, timeout_seconds=1.0, poll_interval_seconds=0.25
             )
 
@@ -370,12 +371,13 @@ class StartupWaitTest(unittest.TestCase):
         processes.assert_not_called()
 
     def test_default_startup_timeout_is_thirty_seconds(self) -> None:
-        self.assertEqual(ensure_background_edge.STARTUP_TIMEOUT_SECONDS, 30.0)
+        self.assertEqual(edge_session.STARTUP_TIMEOUT_SECONDS, 30.0)
 
 
 class AutoPortMainTest(unittest.TestCase):
     def test_default_launch_requests_automatic_port_and_returns_resolved_endpoint(self) -> None:
         config = SimpleNamespace(
+            session="performance-task-entry",
             edge_profile=r"C:\Users\Mirror\AppData\Local\Codex\EdgeBackgroundProfile",
             edge_executable=r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
             cdp_port=0,
@@ -388,21 +390,21 @@ class AutoPortMainTest(unittest.TestCase):
         started = subprocess.CompletedProcess([], 0, "", "")
         output = io.StringIO()
         with (
-            patch.object(ensure_background_edge, "resolve_runtime_paths", return_value=config),
-            patch.object(ensure_background_edge.shutil, "which", side_effect=["powershell.exe", None]),
-            patch.object(ensure_background_edge, "edge_processes", return_value=[]),
-            patch.object(ensure_background_edge, "matching_dedicated_roots", return_value=[]),
-            patch.object(ensure_background_edge, "resolve_auto_endpoint", return_value=None),
-            patch.object(ensure_background_edge, "clear_devtools_active_port"),
-            patch.object(ensure_background_edge, "run_powershell", return_value=started) as run,
+            patch.object(edge_session, "resolve_runtime_paths", return_value=config),
+            patch.object(edge_session.shutil, "which", side_effect=["powershell.exe", None]),
+            patch.object(edge_session, "edge_processes", return_value=[]),
+            patch.object(edge_session, "matching_dedicated_roots", return_value=[]),
+            patch.object(edge_session, "resolve_auto_endpoint", return_value=None),
+            patch.object(edge_session, "clear_devtools_active_port"),
+            patch.object(edge_session, "run_powershell", return_value=started) as run,
             patch.object(
-                ensure_background_edge,
+                edge_session,
                 "wait_for_started_endpoint",
                 return_value=(resolved, "ready", 0.75),
             ),
             redirect_stdout(output),
         ):
-            self.assertEqual(ensure_background_edge.main(), 0)
+            self.assertEqual(edge_session.main(), 0)
 
         self.assertIn("--remote-debugging-port=0", run.call_args.args[1])
         payload = json.loads(output.getvalue())
@@ -419,25 +421,25 @@ class AutoPortMainTest(unittest.TestCase):
         )
         output = io.StringIO()
         with (
-            patch.object(ensure_background_edge, "resolve_runtime_paths", return_value=config),
-            patch.object(ensure_background_edge.shutil, "which", return_value="powershell.exe"),
-            patch.object(ensure_background_edge, "edge_processes", return_value=[]),
-            patch.object(ensure_background_edge, "matching_dedicated_roots", return_value=[]),
-            patch.object(ensure_background_edge, "resolve_auto_endpoint", return_value=None),
-            patch.object(ensure_background_edge, "clear_devtools_active_port"),
+            patch.object(edge_session, "resolve_runtime_paths", return_value=config),
+            patch.object(edge_session.shutil, "which", return_value="powershell.exe"),
+            patch.object(edge_session, "edge_processes", return_value=[]),
+            patch.object(edge_session, "matching_dedicated_roots", return_value=[]),
+            patch.object(edge_session, "resolve_auto_endpoint", return_value=None),
+            patch.object(edge_session, "clear_devtools_active_port"),
             patch.object(
-                ensure_background_edge,
+                edge_session,
                 "run_powershell",
                 return_value=subprocess.CompletedProcess([], 0, "", ""),
             ),
             patch.object(
-                ensure_background_edge,
+                edge_session,
                 "wait_for_started_endpoint",
                 return_value=(None, "waiting_for_devtools_active_port", 31.2478),
             ),
             redirect_stdout(output),
         ):
-            self.assertEqual(ensure_background_edge.main(), 1)
+            self.assertEqual(edge_session.main(), 1)
 
         payload = json.loads(output.getvalue())
         self.assertFalse(payload["ready"])
@@ -455,19 +457,19 @@ class AutoPortMainTest(unittest.TestCase):
         )
         output = io.StringIO()
         with (
-            patch.object(ensure_background_edge, "resolve_runtime_paths", return_value=config),
-            patch.object(ensure_background_edge.shutil, "which", return_value="powershell.exe"),
-            patch.object(ensure_background_edge, "edge_processes", return_value=[]),
-            patch.object(ensure_background_edge, "matching_dedicated_roots", return_value=[]),
-            patch.object(ensure_background_edge, "resolve_fixed_endpoint", return_value=None),
+            patch.object(edge_session, "resolve_runtime_paths", return_value=config),
+            patch.object(edge_session.shutil, "which", return_value="powershell.exe"),
+            patch.object(edge_session, "edge_processes", return_value=[]),
+            patch.object(edge_session, "matching_dedicated_roots", return_value=[]),
+            patch.object(edge_session, "resolve_fixed_endpoint", return_value=None),
             patch.object(
-                ensure_background_edge, "tcp_listeners",
-                return_value=[ensure_background_edge.TcpListener(777, "127.0.0.1", 9223)],
+                edge_session, "tcp_listeners",
+                return_value=[edge_session.TcpListener(777, "127.0.0.1", 9223)],
             ),
-            patch.object(ensure_background_edge, "run_powershell") as run,
+            patch.object(edge_session, "run_powershell") as run,
             redirect_stdout(output),
         ):
-            self.assertEqual(ensure_background_edge.main(), 1)
+            self.assertEqual(edge_session.main(), 1)
 
         self.assertEqual(run.call_count, 0)
         self.assertIn("non-owned endpoint", output.getvalue())
@@ -480,15 +482,15 @@ class AutoPortMainTest(unittest.TestCase):
             cdp_port_is_override=False,
         )
         with (
-            patch.object(ensure_background_edge, "resolve_runtime_paths", return_value=config),
-            patch.object(ensure_background_edge.shutil, "which", return_value="powershell.exe"),
-            patch.object(ensure_background_edge, "edge_processes", return_value=[]),
-            patch.object(ensure_background_edge, "matching_dedicated_roots", return_value=[]),
-            patch.object(ensure_background_edge, "resolve_auto_endpoint", return_value=None),
-            patch.object(ensure_background_edge, "clear_devtools_active_port") as clear,
-            patch.object(ensure_background_edge, "run_powershell", return_value=subprocess.CompletedProcess([], 1, "", "")),
+            patch.object(edge_session, "resolve_runtime_paths", return_value=config),
+            patch.object(edge_session.shutil, "which", return_value="powershell.exe"),
+            patch.object(edge_session, "edge_processes", return_value=[]),
+            patch.object(edge_session, "matching_dedicated_roots", return_value=[]),
+            patch.object(edge_session, "resolve_auto_endpoint", return_value=None),
+            patch.object(edge_session, "clear_devtools_active_port") as clear,
+            patch.object(edge_session, "run_powershell", return_value=subprocess.CompletedProcess([], 1, "", "")),
         ):
-            self.assertEqual(ensure_background_edge.main(), 1)
+            self.assertEqual(edge_session.main(), 1)
         clear.assert_called_once_with(config.edge_profile, "powershell.exe")
 
     def test_auto_mode_does_not_launch_when_an_owned_root_is_unhealthy(self) -> None:
@@ -499,14 +501,14 @@ class AutoPortMainTest(unittest.TestCase):
             cdp_port_is_override=False,
         )
         with (
-            patch.object(ensure_background_edge, "resolve_runtime_paths", return_value=config),
-            patch.object(ensure_background_edge.shutil, "which", return_value="powershell.exe"),
-            patch.object(ensure_background_edge, "edge_processes", return_value=[]),
-            patch.object(ensure_background_edge, "matching_dedicated_roots", return_value=[EndpointOwnershipTest.process(100, "root")]),
-            patch.object(ensure_background_edge, "resolve_auto_endpoint", return_value=None),
-            patch.object(ensure_background_edge, "run_powershell") as run,
+            patch.object(edge_session, "resolve_runtime_paths", return_value=config),
+            patch.object(edge_session.shutil, "which", return_value="powershell.exe"),
+            patch.object(edge_session, "edge_processes", return_value=[]),
+            patch.object(edge_session, "matching_dedicated_roots", return_value=[EndpointOwnershipTest.process(100, "root")]),
+            patch.object(edge_session, "resolve_auto_endpoint", return_value=None),
+            patch.object(edge_session, "run_powershell") as run,
         ):
-            self.assertEqual(ensure_background_edge.main(), 1)
+            self.assertEqual(edge_session.main(), 1)
         self.assertEqual(run.call_count, 0)
 
     def test_fixed_mode_does_not_launch_when_owned_root_endpoint_is_unhealthy_even_if_port_is_closed(self) -> None:
@@ -517,15 +519,15 @@ class AutoPortMainTest(unittest.TestCase):
             cdp_port_is_override=True,
         )
         with (
-            patch.object(ensure_background_edge, "resolve_runtime_paths", return_value=config),
-            patch.object(ensure_background_edge.shutil, "which", return_value="powershell.exe"),
-            patch.object(ensure_background_edge, "edge_processes", return_value=[]),
-            patch.object(ensure_background_edge, "matching_dedicated_roots", return_value=[EndpointOwnershipTest.process(100, "root")]),
-            patch.object(ensure_background_edge, "resolve_fixed_endpoint", return_value=None),
-            patch.object(ensure_background_edge, "loopback_listener_owner", return_value=("none", None)),
-            patch.object(ensure_background_edge, "run_powershell") as run,
+            patch.object(edge_session, "resolve_runtime_paths", return_value=config),
+            patch.object(edge_session.shutil, "which", return_value="powershell.exe"),
+            patch.object(edge_session, "edge_processes", return_value=[]),
+            patch.object(edge_session, "matching_dedicated_roots", return_value=[EndpointOwnershipTest.process(100, "root")]),
+            patch.object(edge_session, "resolve_fixed_endpoint", return_value=None),
+            patch.object(edge_session, "loopback_listener_owner", return_value=("none", None)),
+            patch.object(edge_session, "run_powershell") as run,
         ):
-            self.assertEqual(ensure_background_edge.main(), 1)
+            self.assertEqual(edge_session.main(), 1)
         self.assertEqual(run.call_count, 0)
 
 

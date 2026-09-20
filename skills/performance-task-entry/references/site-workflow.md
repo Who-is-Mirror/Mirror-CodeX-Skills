@@ -6,7 +6,7 @@
 - 页面路径：`项目信息 → 任务填报`
 - Edge：自动在 x86 Program Files、Program Files 和当前 Windows 用户的本地安装位置查找。
 - 专用用户目录：`<Windows 用户目录>\AppData\Local\Codex\EdgeBackgroundProfile`
-- CDP 端口：默认让 Edge 以 `--remote-debugging-port=0` 自动分配；实际端口只从专用用户目录的 `DevToolsActivePort` 读取。WSL 先读直接挂载路径；若 Codex 桌面包把 Windows 路径重定向到包的 LocalCache，则回退到 PowerShell 对同一逻辑路径的读取
+- CDP 会话：由相邻安装的 `edge-cdp-session` 技能管理；默认让 Edge 以 `--remote-debugging-port=0` 自动分配，并返回已经过进程、监听和 endpoint 校验的实际地址
 - Playwright 会话名：`edge-performance`
 
 `runtime_paths.py` 默认根据技能安装目录推导 Codex 目录和 Windows 用户目录。在非标准机器或共享归档场景中，可只为当前命令设置以下显式覆盖；`doctor.py` 会显示解析后的非敏感值：
@@ -47,7 +47,7 @@ Edge 设置页中的浏览器调试开关不参与本流程，关闭时也能正
 
 ## 两道门禁通过后的浏览器检查
 
-1. 只运行 `python3 scripts/probe_browser.py`。它由 `ensure_background_edge.py` 从专用用户目录的 `DevToolsActivePort` 解析实际端点；确认该目录没有根浏览器进程且启动检查通过时，才启动一个独立、后台、可持久复用的 Edge 实例，参数为：
+1. 只运行 `python3 scripts/probe_browser.py`。`ensure_background_edge.py` 是业务侧兼容适配器：它把本技能原有专用 profile 交给 `edge-cdp-session/scripts/ensure_session.py`，由共享技能解析或启动一个独立、后台、可持久复用的 Edge 实例。共享技能使用的关键参数为：
 
 ```text
 --remote-debugging-port=0
@@ -60,7 +60,7 @@ Edge 设置页中的浏览器调试开关不参与本流程，关闭时也能正
 about:blank
 ```
 
-2. 启动时使用独立进程和隐藏窗口；按单调时钟设置 30 秒启动等待期限。自动端口模式优先在 WSL 本地轮询专用目录的完整 `DevToolsActivePort`；直接挂载路径不可见或内容不完整时，使用轻量 PowerShell 文件读取，让 Windows 解析 Codex 桌面包的 LocalCache 重定向。状态文件尚未出现时不反复执行较重的 Windows 进程和监听查询；文件出现后才执行完整归属校验。截止时间到达时仍做最后一次验证；正在执行的 Windows 查询允许正常结束，所以最终实际耗时可能略高于 30 秒，失败时会输出实际耗时和最后停留阶段：
+2. 以下启动、等待和归属校验均由 `edge-cdp-session` 独占实现；本技能不得复制、弱化或绕过。共享技能启动时使用独立进程和隐藏窗口；按单调时钟设置 30 秒启动等待期限。自动端口模式优先在 WSL 本地轮询专用目录的完整 `DevToolsActivePort`；直接挂载路径不可见或内容不完整时，使用轻量 PowerShell 文件读取，让 Windows 解析 Codex 桌面包的 LocalCache 重定向。状态文件尚未出现时不反复执行较重的 Windows 进程和监听查询；文件出现后才执行完整归属校验。截止时间到达时仍做最后一次验证；正在执行的 Windows 查询允许正常结束，所以最终实际耗时可能略高于 30 秒，失败时会输出实际耗时和最后停留阶段：
 
    - 保留 Windows Edge 进程的 PID、父 PID 和命令行，先按规范化后的完整 `--user-data-dir` 查找所有根浏览器进程，不按调试端口提前筛选。带 `--type` 的 renderer/utility 子进程不作为根进程。只有恰好一个根进程时才检查它的调试端口是否为本次模式要求的 `0` 或显式覆盖值。其他模式、缺失调试端口、多个根进程或不可读元数据均不允许复用。
    - `Get-NetTCPConnection` 保留该端口所有地址的 `LocalAddress`、`LocalPort`、`OwningProcess`。实际连接固定拨向 `127.0.0.1`，因此 `127.0.0.1` 和 IPv4 通配地址 `0.0.0.0` 的所有 owner 都参与判定，owner 集合必须恰好等于该唯一根 PID。仅有 `::1` 不能证明 IPv4 归属；IPv6 通配或 IPv4 映射地址缺少双栈信息、记录不完整、查询失败或有竞争 owner 时，在 CDP 探测前失败。

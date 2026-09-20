@@ -3,9 +3,8 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { planDateTabRetention } from './date_tab_retention.mjs';
-import { disconnectPlaywrightTransport, loadPlaywrightRuntime } from './playwright_runtime.mjs';
+import { disconnectPlaywrightTransport, loadPlaywrightRuntime, resolveManagedCdpEndpoint } from './playwright_runtime.mjs';
 
-const DEFAULT_CDP = 'http://127.0.0.1:9223';
 
 function parseArgs(argv) {
   const result = { max_tabs: 5, replace_existing: false };
@@ -138,7 +137,7 @@ async function reorderTabs(page, desiredOrder) {
 
 const options = parseArgs(process.argv.slice(2));
 const { chromium } = await loadPlaywrightRuntime();
-const browser = await chromium.connectOverCDP(options.cdp || DEFAULT_CDP);
+const browser = await chromium.connectOverCDP(resolveManagedCdpEndpoint(options.cdp).endpoint);
 let result;
 try {
   const pages = browser.contexts().flatMap((context) => context.pages()).filter((page) => page.url().includes(`/sheet/${options.document_id}`));

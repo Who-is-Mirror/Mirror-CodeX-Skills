@@ -3,9 +3,8 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { disconnectPlaywrightTransport, loadPlaywrightRuntime } from './playwright_runtime.mjs';
+import { disconnectPlaywrightTransport, loadPlaywrightRuntime, resolveManagedCdpEndpoint } from './playwright_runtime.mjs';
 
-const DEFAULT_CDP = 'http://127.0.0.1:9223';
 const HOME_URL = 'https://doc.weixin.qq.com/home/recent';
 
 export function isWecomHomeUrl(value) {
@@ -65,7 +64,7 @@ export async function checkWecomLogin(options) {
   const outputDir = resolve(options.output_dir);
   await mkdir(outputDir, { recursive: true });
   const { chromium } = await loadPlaywrightRuntime();
-  const browser = await chromium.connectOverCDP(options.cdp || DEFAULT_CDP);
+  const browser = await chromium.connectOverCDP(resolveManagedCdpEndpoint(options.cdp).endpoint);
   try {
     const contexts = browser.contexts();
     if (contexts.length !== 1) throw new Error(`Edge CDP context 必须唯一，实际 ${contexts.length}`);

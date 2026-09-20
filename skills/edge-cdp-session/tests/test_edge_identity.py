@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import ensure_background_edge as edge
+import edge_session as edge
 
 
 PROFILE = r"C:\Users\Mirror\AppData\Local\Codex\EdgeBackgroundProfile"

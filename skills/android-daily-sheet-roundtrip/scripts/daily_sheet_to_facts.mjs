@@ -4,11 +4,10 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { loadPlaywrightRuntime } from './playwright_runtime.mjs';
+import { loadPlaywrightRuntime, resolveManagedCdpEndpoint } from './playwright_runtime.mjs';
 
 export const FACTS_SCHEMA = 'akbs-daily-work-facts-v4';
 export const ALLOWED_STATUSES = new Set(['已完成', '处理中', '待验证', '阻塞']);
-export const DEFAULT_CDP_URL = 'http://127.0.0.1:9223';
 
 const COLUMNS = ['A', 'B', 'C', 'D', 'E', 'F'];
 const SPECIAL_SECTIONS = new Map([
@@ -547,7 +546,7 @@ async function locateSheetTab(page, sheetName) {
 }
 
 async function disconnectWithoutClosingBrowser(browser) {
-  // connectOverCDP attaches to a user-owned browser. Closing Browser would close that browser;
+  // connectOverCDP attaches to the managed dedicated browser. Closing Browser would close it;
   // close only this Playwright transport when the pinned runtime exposes the connection.
   const connection = browser?._connection;
   if (connection && typeof connection.close === 'function') {
@@ -567,14 +566,13 @@ export async function readCellsOverCdp({
   maxRows = 500,
   emptyRowLimit = 5,
 } = {}) {
-  if (!cdpUrl) fail('--cdp 不能为空');
   if (!normalizeText(sheetName)) fail('CDP 模式必须提供 --sheet');
   for (const [name, value] of Object.entries({ timeoutMs, cellTimeoutMs, maxRows, emptyRowLimit })) {
     if (!Number.isInteger(value) || value <= 0) fail(`${name} 必须是正整数`);
   }
 
   const { chromium } = await loadPlaywrightRuntime();
-  const browser = await chromium.connectOverCDP(cdpUrl, { timeout: timeoutMs });
+  const browser = await chromium.connectOverCDP(resolveManagedCdpEndpoint(cdpUrl).endpoint, { timeout: timeoutMs });
   try {
     let selectedPage = null;
     let selectedTab = null;
@@ -677,7 +675,7 @@ function usage() {
   node scripts/daily_sheet_to_facts.mjs [--cdp <url>] --sheet <name> --date YYYY-MM-DD --output <facts.json>
 
 CDP 限制参数:
-  --cdp <url>            后台 Edge CDP，默认 ${DEFAULT_CDP_URL}
+  --cdp <url>            受控排障覆盖；默认由 edge-cdp-session 启动并校验专用 Edge
   --timeout-ms <n>       页面/连接超时，默认 15000
   --cell-timeout-ms <n>  单元格操作超时，默认 3000
   --max-rows <n>         最大读取行数，默认 500
@@ -705,7 +703,7 @@ export async function main(argv = process.argv.slice(2)) {
     }
   } else {
     payload = await readCellsOverCdp({
-      cdpUrl: options.cdp || DEFAULT_CDP_URL,
+      cdpUrl: options.cdp,
       sheetName: options.sheet,
       timeoutMs: options.timeout_ms ? parsePositiveInteger(options.timeout_ms, '--timeout-ms') : undefined,
       cellTimeoutMs: options.cell_timeout_ms ? parsePositiveInteger(options.cell_timeout_ms, '--cell-timeout-ms') : undefined,

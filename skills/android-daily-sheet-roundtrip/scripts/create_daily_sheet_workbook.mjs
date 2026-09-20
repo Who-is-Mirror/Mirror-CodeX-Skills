@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 
-import { disconnectPlaywrightTransport, loadPlaywrightRuntime } from './playwright_runtime.mjs';
+import { disconnectPlaywrightTransport, loadPlaywrightRuntime, resolveManagedCdpEndpoint } from './playwright_runtime.mjs';
 
-const DEFAULT_CDP = 'http://127.0.0.1:9223';
 
 function parseArgs(argv) {
   const result = {};
@@ -26,7 +25,7 @@ async function lastVisible(locator) {
 
 const options = parseArgs(process.argv.slice(2));
 const { chromium } = await loadPlaywrightRuntime();
-const browser = await chromium.connectOverCDP(options.cdp || DEFAULT_CDP);
+const browser = await chromium.connectOverCDP(resolveManagedCdpEndpoint(options.cdp).endpoint);
 try {
   const contexts = browser.contexts();
   if (contexts.length !== 1) throw new Error(`Edge CDP context 必须唯一，实际 ${contexts.length}`);

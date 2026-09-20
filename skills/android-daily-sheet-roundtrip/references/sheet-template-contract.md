@@ -38,4 +38,4 @@ The canonical editable-sheet template is `assets/daily-sheet-template.json`. It 
 - Reject non-date worksheets, duplicate dates, ambiguous deletion targets or unverifiable order. A fresh blank workbook may bootstrap by renaming its sole empty default worksheet.
 - Before writing, reject any template asset containing a `forbidden_real_markers` token.
 - After writing, read every A:F cell back, compare normalized values, verify required merges/wrap state where the UI exposes stable state, and capture screenshots.
-- Attach only to the existing background Edge CDP session and disconnect the transport without closing Edge.
+- Attach only to the endpoint verified by `edge-cdp-session` for this skill's dedicated profile, and disconnect the Playwright transport without closing Edge.

@@ -4,7 +4,7 @@ import { mkdir, readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validateTemplate } from './sheet_template.mjs';
-import { disconnectPlaywrightTransport, loadPlaywrightRuntime } from './playwright_runtime.mjs';
+import { disconnectPlaywrightTransport, loadPlaywrightRuntime, resolveManagedCdpEndpoint } from './playwright_runtime.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const template = validateTemplate(JSON.parse(await readFile(resolve(root, 'assets', 'daily-sheet-template.json'), 'utf8')));
@@ -21,7 +21,7 @@ async function visibleButton(page, name) {
 }
 
 const { chromium } = await loadPlaywrightRuntime();
-const browser = await chromium.connectOverCDP(args.cdp || 'http://127.0.0.1:9223');
+const browser = await chromium.connectOverCDP(resolveManagedCdpEndpoint(args.cdp).endpoint);
 try {
   const pages = browser.contexts().flatMap((context) => context.pages()).filter((page) => page.url().includes(`/sheet/${args.document_id}`));
   if (pages.length !== 1) throw new Error(`目标表格页面必须唯一，实际 ${pages.length}`);

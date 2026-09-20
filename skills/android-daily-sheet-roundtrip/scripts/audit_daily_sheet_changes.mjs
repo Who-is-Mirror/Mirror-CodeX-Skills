@@ -538,7 +538,7 @@ export async function main(argv = process.argv.slice(2)) {
   const baseline = JSON.parse(await readFile(resolve(options.baseline), 'utf8'));
   const current = options.current
     ? JSON.parse(await readFile(resolve(options.current), 'utf8'))
-    : await readCellsOverCdp({ cdpUrl: options.cdp || 'http://127.0.0.1:9223', sheetName: options.sheet });
+    : await readCellsOverCdp({ cdpUrl: options.cdp, sheetName: options.sheet });
   let acceptedFindingIds = [];
   if (options.decisions) {
     const decisions = JSON.parse(await readFile(resolve(options.decisions), 'utf8'));

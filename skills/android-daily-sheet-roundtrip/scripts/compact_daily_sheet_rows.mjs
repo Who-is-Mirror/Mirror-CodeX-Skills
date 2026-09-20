@@ -3,11 +3,10 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { disconnectPlaywrightTransport, loadPlaywrightRuntime } from './playwright_runtime.mjs';
+import { disconnectPlaywrightTransport, loadPlaywrightRuntime, resolveManagedCdpEndpoint } from './playwright_runtime.mjs';
 
 export const COMPACTION_SCHEMA = 'android-daily-sheet-row-repair-plan-v3';
 const AUDIT_SCHEMA = 'android-daily-sheet-change-audit-v1';
-const DEFAULT_CDP = 'http://127.0.0.1:9223';
 const COLUMNS = ['A', 'B', 'C', 'D', 'E', 'F'];
 
 const normalize = (value) => String(value ?? '').replace(/\r\n?/g, '\n').trim();
@@ -112,7 +111,7 @@ export async function compactRows(options) {
   const outputDir = resolve(options.output_dir);
   await mkdir(outputDir, { recursive: true });
   const { chromium } = await loadPlaywrightRuntime();
-  const browser = await chromium.connectOverCDP(options.cdp || DEFAULT_CDP, { timeout: 15000 });
+  const browser = await chromium.connectOverCDP(resolveManagedCdpEndpoint(options.cdp).endpoint, { timeout: 15000 });
   try {
     const pages = browser.contexts().flatMap((context) => context.pages()).filter((page) => page.url().includes(`/sheet/${options.document_id}`));
     if (pages.length !== 1) throw new Error(`目标表格页面必须唯一，实际 ${pages.length}`);

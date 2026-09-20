@@ -4,10 +4,10 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import {
   BrowserPrerequisiteError,
-  DEFAULT_CDP_URL,
   disconnectPlaywrightTransport,
   loadPlaywrightRuntime,
   playwrightInstallRequest,
+  resolveManagedCdpEndpoint,
 } from './playwright_runtime.mjs';
 
 function parseArgs(argv) {
@@ -48,10 +48,11 @@ try {
   process.exit(2);
 }
 
-const cdp = options.cdp || DEFAULT_CDP_URL;
 let browser;
+let cdpSession;
 try {
-  browser = await runtime.chromium.connectOverCDP(cdp, { timeout: 5000 });
+  cdpSession = resolveManagedCdpEndpoint(options.cdp);
+  browser = await runtime.chromium.connectOverCDP(cdpSession.endpoint, { timeout: 5000 });
   const contexts = browser.contexts();
   if (contexts.length !== 1) throw new Error(`Edge CDP context 必须唯一，实际 ${contexts.length}`);
   await emit({
@@ -60,7 +61,8 @@ try {
     node: process.version,
     playwright_module: runtime.modulePath,
     playwright_source: runtime.source,
-    cdp,
+    cdp: cdpSession.endpoint,
+    cdp_source: cdpSession.source,
     context_count: contexts.length,
     page_count: contexts[0].pages().length,
   }, options.result);
@@ -71,8 +73,11 @@ try {
     message: `无法连接后台 Edge CDP: ${error.message}`,
     playwright_module: runtime.modulePath,
     playwright_source: runtime.source,
-    cdp,
-    user_action_required: '请确认是否允许启动或重启带远程调试端口的 Edge；不要关闭用户浏览器或改动配置后自行重试。',
+    cdp: cdpSession?.endpoint || options.cdp || null,
+    cdp_source: cdpSession?.source || null,
+    user_action_required: error instanceof BrowserPrerequisiteError
+      ? '按错误信息修复共享 Edge 会话前置条件后重试；无需开启日常 Edge 的浏览器调试开关。'
+      : '专用 Edge 已由共享技能管理；请根据连接错误修复环境后重试。',
   }, options.result);
   process.exitCode = 3;
 } finally {

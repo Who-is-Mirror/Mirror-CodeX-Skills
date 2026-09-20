@@ -3,10 +3,9 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { disconnectPlaywrightTransport, loadPlaywrightRuntime } from './playwright_runtime.mjs';
+import { disconnectPlaywrightTransport, loadPlaywrightRuntime, resolveManagedCdpEndpoint } from './playwright_runtime.mjs';
 
 export const REPAIR_SCHEMA = 'android-daily-sheet-repair-plan-v2';
-export const DEFAULT_CDP_URL = 'http://127.0.0.1:9223';
 const AUDIT_SCHEMA = 'android-daily-sheet-change-audit-v1';
 const REPAIR_KINDS = new Set(['restore', 'renumber', 'canonicalize-label', 'consistency-rewrite']);
 
@@ -106,7 +105,7 @@ export async function applyRepairs(options) {
   const outputDir = resolve(options.output_dir);
   await mkdir(outputDir, { recursive: true });
   const { chromium } = await loadPlaywrightRuntime();
-  const browser = await chromium.connectOverCDP(options.cdp || DEFAULT_CDP_URL, { timeout: 15000 });
+  const browser = await chromium.connectOverCDP(resolveManagedCdpEndpoint(options.cdp).endpoint, { timeout: 15000 });
   let page;
   const attempted = [];
   try {

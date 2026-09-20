@@ -4,11 +4,10 @@ import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { disconnectPlaywrightTransport, loadPlaywrightRuntime } from './playwright_runtime.mjs';
+import { disconnectPlaywrightTransport, loadPlaywrightRuntime, resolveManagedCdpEndpoint } from './playwright_runtime.mjs';
 import { COLUMNS, normalizeCell } from './sheet_template.mjs';
 
 export const SNAPSHOT_SCHEMA = 'android-daily-sheet-snapshot-v2';
-const DEFAULT_CDP_URL = 'http://127.0.0.1:9223';
 
 function sha256(value) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -106,11 +105,11 @@ async function locateExactTab(page, sheetName) {
   throw new Error(`未找到工作表 tab“${sheetName}”`);
 }
 
-export async function captureDailySheetSnapshot({ cdpUrl = DEFAULT_CDP_URL, documentId, sheetName, screenshotPath, timeoutMs = 15_000, maxRows = 500, emptyRowLimit = 5 }) {
+export async function captureDailySheetSnapshot({ cdpUrl, documentId, sheetName, screenshotPath, timeoutMs = 15_000, maxRows = 500, emptyRowLimit = 5 }) {
   const started = performance.now();
   const { chromium } = await loadPlaywrightRuntime();
   const attachStarted = performance.now();
-  const browser = await chromium.connectOverCDP(cdpUrl, { timeout: timeoutMs });
+  const browser = await chromium.connectOverCDP(resolveManagedCdpEndpoint(cdpUrl).endpoint, { timeout: timeoutMs });
   const attachMs = performance.now() - attachStarted;
   try {
     const pages = browser.contexts().flatMap((context) => context.pages()).filter((page) => page.url().includes(`/sheet/${documentId}`));
@@ -243,7 +242,7 @@ export async function captureDailySheetSnapshot({ cdpUrl = DEFAULT_CDP_URL, docu
 export async function main(argv = process.argv.slice(2)) {
   const options = parseArgs(argv);
   const snapshot = await captureDailySheetSnapshot({
-    cdpUrl: options.cdp || DEFAULT_CDP_URL,
+    cdpUrl: options.cdp,
     documentId: options.document_id,
     sheetName: options.sheet,
     timeoutMs: options.timeout_ms,

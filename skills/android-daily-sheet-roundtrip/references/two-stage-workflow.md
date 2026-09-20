@@ -6,8 +6,8 @@ This workflow deliberately creates an editable sheet before it creates any repor
 
 - Resolve the newest installed directory under `$CODEX_HOME/plugins/cache/android-framework-codex-suite/android-framework-ops/` with version-aware ordering. Never pin a cached version.
 - Keep the report date explicit and reject future dates.
-- Run `scripts/check_browser_prerequisites.mjs` before either stage. Prefer the Codex-bundled Playwright runtime; use an already approved dedicated local runtime only when the bundle is unavailable. Attach only to the existing user-owned Edge CDP endpoint, default `http://127.0.0.1:9223`; an explicit endpoint may override it.
-- Never install Playwright, Node, npm, `pngjs`, or change/restart Edge without explicit user approval. Never create task-local Playwright bridge modules, `node_modules` symlinks, or repeatedly probe guessed package entrypoints. A missing runtime or CDP endpoint is a prerequisite gate, not a reason to improvise setup.
+- Run `scripts/check_browser_prerequisites.mjs` before either stage. Prefer the Codex-bundled Playwright runtime; use an already approved dedicated local runtime only when the bundle is unavailable. The script must obtain the endpoint from the installed `edge-cdp-session` skill, which owns dedicated-Edge startup, dynamic port allocation, exact profile/root PID validation, IPv4 listener PID ownership, and endpoint validation. An explicit local endpoint may request a controlled fixed troubleshooting port, but it still passes through the same shared ownership validation and is never connected directly.
+- Never install Playwright, Node, npm, `pngjs`, Edge, PowerShell, or another skill without explicit user approval. Never ask the user to enable the daily Edge debugging switch, create task-local Playwright bridge modules, create `node_modules` symlinks, or probe ports/package entrypoints. A missing runtime or managed CDP session is a prerequisite gate, not a reason to improvise setup.
 - Playwright may operate DOM locators in the background. Never use OS-level or foreground mouse automation, never launch a replacement browser, and never call `browser.close()` on the attached browser. Disconnect only the Playwright transport.
 - A changed/unknown plugin API, page structure, duplicate tab match, ambiguous identity, or unverifiable write is a hard stop.
 - Do not modify the customer registry. An unregistered project is not learned from one draft; the customer guard remains authoritative in Stage B.
@@ -153,7 +153,7 @@ Stage A requires a fresh user request for one exact date and explicit session co
 
 Enter Stage B only after a new explicit statement such as “修改完成” or “从表格反推日报”. That statement authorizes conversion and preparation, not submission.
 
-Rerun `scripts/check_browser_prerequisites.mjs` before reading the edited sheet. A prior Stage A pass does not prove that the runtime or Edge CDP endpoint is still available. Apply the same approval gates for missing Playwright/Node/npm or unavailable CDP, and do not begin report preparation until the browser preflight passes.
+Rerun `scripts/check_browser_prerequisites.mjs` before reading the edited sheet. A prior Stage A pass does not prove that the runtime or managed Edge CDP endpoint is still available. Apply the same approval gates for missing software and stop on shared-session validation failures; do not begin report preparation until the browser preflight passes.
 
 Before conversion, locate the exact Stage A `stage-a-sheet-snapshot.json`, `rows.json`, reviewed facts and manifest for this workbook/date. If the baseline cannot be uniquely resolved, stop instead of guessing. Read [sheet-recovery-matrix.md](sheet-recovery-matrix.md). Capture the current workbook model once and reuse that immutable snapshot for audit, screenshot and conversion:
 

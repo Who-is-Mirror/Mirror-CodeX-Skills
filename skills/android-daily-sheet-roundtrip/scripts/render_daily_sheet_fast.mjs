@@ -5,12 +5,11 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDualClipboardPayload, deriveSheetLayout, refInRange } from './sheet_clipboard.mjs';
 import { buildSnapshot } from './capture_daily_sheet_snapshot.mjs';
-import { disconnectPlaywrightTransport, loadPlaywrightRuntime } from './playwright_runtime.mjs';
+import { disconnectPlaywrightTransport, loadPlaywrightRuntime, resolveManagedCdpEndpoint } from './playwright_runtime.mjs';
 import { calculateRowHeights, expectedSheetCells, normalizeCell, validateTemplate, valuesFromInput } from './sheet_template.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ASSET = resolve(SCRIPT_DIR, '..', 'assets', 'daily-sheet-template.json');
-const DEFAULT_CDP = 'http://127.0.0.1:9223';
 const WECOM_MODULES = {
   pasteChunk: 23306,
   pasteModule: 768363,
@@ -50,7 +49,7 @@ const outputDir = resolve(options.output_dir);
 await mkdir(outputDir, { recursive: true });
 
 const { chromium } = await loadPlaywrightRuntime();
-const browser = await chromium.connectOverCDP(options.cdp || DEFAULT_CDP);
+const browser = await chromium.connectOverCDP(resolveManagedCdpEndpoint(options.cdp).endpoint);
 let clipboardSnapshotKey;
 let clipboardRestore = { captured: false, restored: false, captured_types: [], skipped_types: [] };
 let operationError;

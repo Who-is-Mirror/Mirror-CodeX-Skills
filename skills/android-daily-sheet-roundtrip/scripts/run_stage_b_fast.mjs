@@ -46,7 +46,7 @@ export async function main(argv = process.argv.slice(2)) {
   ]);
   const started = performance.now();
   const snapshot = await captureDailySheetSnapshot({
-    cdpUrl: options.cdp || 'http://127.0.0.1:9223',
+    cdpUrl: options.cdp,
     documentId: options.document_id,
     sheetName: options.sheet,
     screenshotPath: paths.screenshot,
