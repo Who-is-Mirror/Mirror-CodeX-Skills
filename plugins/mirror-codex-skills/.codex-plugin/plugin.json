@@ -1,0 +1,32 @@
+{
+  "name": "mirror-codex-skills",
+  "version": "0.1.0",
+  "description": "Mirror's reusable Codex skills, packaged as a single plugin.",
+  "author": {
+    "name": "Who-is-Mirror",
+    "url": "https://github.com/Who-is-Mirror"
+  },
+  "homepage": "https://github.com/Who-is-Mirror/Mirror-CodeX-Skills",
+  "repository": "https://github.com/Who-is-Mirror/Mirror-CodeX-Skills",
+  "keywords": [
+    "codex",
+    "skills",
+    "android",
+    "browser-automation",
+    "productivity"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Mirror Codex Skills",
+    "shortDescription": "Reusable workflow and browser automation skills for Codex.",
+    "longDescription": "A collection of Mirror's reusable Codex skills, distributed through a public GitHub marketplace.",
+    "developerName": "Who-is-Mirror",
+    "category": "Productivity",
+    "capabilities": [
+      "Skills"
+    ],
+    "defaultPrompt": [
+      "Help me use the Mirror Codex Skills plugin."
+    ]
+  }
+}
