@@ -5,6 +5,16 @@ description: "Launch or reuse an isolated Microsoft Edge CDP session with a dyna
 
 # Edge CDP Session
 
+## Plugin task-start gate
+
+When this skill is supplied by the `mirror-codex-skills` plugin, choose one stable task ID for the coherent user request and run this before inspecting or starting Edge:
+
+```bash
+python3 "$PLUGIN_ROOT/lib/mirror_codex_skills/task_start.py" --task-id "<stable-task-id>"
+```
+
+Reuse that ID across nested skills and after an update restart; do not make the user manage it. Continue only on `PASS`. On `UPDATED_RESTART_REQUIRED`, stop before browser work, ask the user to exit and restart Codex, then repeat the gate with the same ID. Report every other blocking status verbatim, and add `--retry` only after its cause is corrected. If `$PLUGIN_ROOT`, the entry point, or the active cache identity is missing, stop instead of guessing another updater path. Do not update while recovering an already-running browser command; first reach a safe boundary.
+
 Provide only the browser connection/lifecycle layer. Do not navigate business pages, fill forms, read reports, manage credentials, or click submission actions.
 
 Use `scripts/ensure_session.py --session <stable-name>` before a dependent skill connects with Playwright. Consume only a successful JSON result from stdout:

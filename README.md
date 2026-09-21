@@ -78,19 +78,28 @@ codex plugin list --marketplace mirror-codex-marketplace --available --json
 ```
 
 结果中应同时出现 Marketplace `mirror-codex-marketplace` 和已安装插件
-`mirror-codex-skills`，插件版本应为 `0.1.0`。
+`mirror-codex-skills`，插件版本应为 `0.2.0` 或更高稳定版本。
 
 ## 获取更新
 
-GitHub 上发布新版本不会直接替换其他成员电脑里的插件缓存。成员让 Codex 执行：
+`0.2.0` 起，三个技能都有同一个任务启动门禁。每个完整用户需求第一次使用任一
+Mirror 技能时，Codex 会检查 GitHub `main` 的插件清单；只有远端稳定版本更高时，
+才自动执行：
 
 ```bash
 codex plugin marketplace upgrade mirror-codex-marketplace --json
 codex plugin add mirror-codex-skills@mirror-codex-marketplace --json
 ```
 
-随后重启 Codex 或新建任务，让新任务加载更新后的技能。仅重启 Codex 不等于刷新
-GitHub Marketplace；必须先完成上述 upgrade 和重新安装。
+更新器随后重新读取插件 inventory，并核对新版本缓存和启用状态。确认成功后它会
+停止当前业务操作并要求退出、重启 Codex；重启后同一任务复用原任务 ID，再次门禁
+通过才继续。检查或更新失败会保留失败状态，不会在每条命令前无限重试；修复网络或
+Marketplace 状态后才显式重试。
+
+这不是后台轮询，也不是单纯重启 Codex 就刷新 GitHub。只有实际开始使用本插件技能
+的新任务才触发一次检查。仍在使用 `0.1.0` 的成员必须先手动执行上面两条命令一次，
+获得带更新器的 `0.2.0`；旧版本无法自动安装自己尚未包含的更新器。自动更新异常时，
+同样可用这两条命令手动恢复。
 
 维护者发布新版本时，需要同步更新 `plugins/mirror-codex-skills/skills/`、提升
 `plugins/mirror-codex-skills/.codex-plugin/plugin.json` 的版本号、完成校验并推送到
@@ -115,6 +124,10 @@ python3 "$CODEX_HOME/skills/.system/plugin-creator/scripts/validate_plugin.py" \
   plugins/mirror-codex-skills
 
 diff -qr -x __pycache__ skills plugins/mirror-codex-skills/skills
+
+python3 -m unittest discover \
+  -s plugins/mirror-codex-skills/tests \
+  -p 'test_*.py'
 
 python3 -m unittest discover \
   -s skills/edge-cdp-session/tests \

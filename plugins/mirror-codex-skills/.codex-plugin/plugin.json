@@ -1,6 +1,6 @@
 {
   "name": "mirror-codex-skills",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Mirror's reusable Codex skills, packaged as a single plugin.",
   "author": {
     "name": "Who-is-Mirror",
@@ -19,7 +19,7 @@
   "interface": {
     "displayName": "Mirror Codex Skills",
     "shortDescription": "Reusable workflow and browser automation skills for Codex.",
-    "longDescription": "A collection of Mirror's reusable Codex skills, distributed through a public GitHub marketplace.",
+    "longDescription": "A collection of Mirror's reusable Codex skills with a verified task-start updater, distributed through a public GitHub marketplace.",
     "developerName": "Who-is-Mirror",
     "category": "Productivity",
     "capabilities": [

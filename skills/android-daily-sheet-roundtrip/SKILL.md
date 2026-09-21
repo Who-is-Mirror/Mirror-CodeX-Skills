@@ -5,6 +5,16 @@ description: "Run Mirror's Android daily-report roundtrip in two gated stages: d
 
 # Android Daily Sheet Roundtrip
 
+## 插件任务启动门禁
+
+当本技能由 `mirror-codex-skills` 插件提供时，在任何日报检查、会话扫描或浏览器命令之前，先为本次完整用户需求选择一个稳定任务 ID，并运行：
+
+```bash
+python3 "$PLUGIN_ROOT/lib/mirror_codex_skills/task_start.py" --task-id "<stable-task-id>"
+```
+
+同一需求的后续步骤、嵌套技能以及更新后重启必须复用这个 ID；不要让用户管理它，也不要把永久聊天 ID 用于不相关需求。`PASS` 才能继续。`UPDATED_RESTART_REQUIRED` 时停止业务操作，请用户退出并重启 Codex，再用同一 ID 重新执行门禁。`CHECK_FAILED`、`UPDATE_FAILED`、`STARTUP_BUSY` 或其他阻塞状态都必须原样报告；修复原因后才可显式添加 `--retry`。没有 `$PLUGIN_ROOT`、入口文件缺失或安装缓存不一致时停止，不得从猜测路径运行更新器。正在恢复已运行的浏览器或报告命令时不要更新，先到达安全边界。
+
 Keep the two stages strictly separate:
 
 1. **Stage A — sessions to sheet draft.** Require fresh consent for the exact report date, load the newest installed `android-daily-report-intake` skill, and follow its normal semantic session-review and v4 facts-generation process. The resulting facts are the daily report content; the sheet is only an editable A:F view of those same facts. Then write and screenshot the dated sheet through the managed dedicated Edge CDP session. Do not prepare a report or create Markdown, `report_view`, or pending material. Stop after the screenshot and wait for the user.
