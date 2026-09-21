@@ -78,7 +78,7 @@ codex plugin list --marketplace mirror-codex-marketplace --available --json
 ```
 
 结果中应同时出现 Marketplace `mirror-codex-marketplace` 和已安装插件
-`mirror-codex-skills`，插件版本应为 `0.2.0` 或更高稳定版本。
+`mirror-codex-skills`，插件版本应为 `0.2.1` 或更高稳定版本。
 
 ## 获取更新
 
@@ -98,7 +98,7 @@ Marketplace 状态后才显式重试。
 
 这不是后台轮询，也不是单纯重启 Codex 就刷新 GitHub。只有实际开始使用本插件技能
 的新任务才触发一次检查。仍在使用 `0.1.0` 的成员必须先手动执行上面两条命令一次，
-获得带更新器的 `0.2.0`；旧版本无法自动安装自己尚未包含的更新器。自动更新异常时，
+获得带更新器的 `0.2.1`；旧版本无法自动安装自己尚未包含的更新器。自动更新异常时，
 同样可用这两条命令手动恢复。
 
 维护者发布新版本时，需要同步更新 `plugins/mirror-codex-skills/skills/`、提升

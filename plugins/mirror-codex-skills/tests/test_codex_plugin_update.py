@@ -17,6 +17,9 @@ sys.path.insert(0, str(LIB))
 import codex_plugin_update as update
 
 
+COMMIT = "a" * 40
+
+
 class Response(io.BytesIO):
     def __enter__(self):
         return self
@@ -38,6 +41,46 @@ class VersionTest(unittest.TestCase):
 
 
 class ManifestFetchTest(unittest.TestCase):
+    def test_resolves_main_then_builds_an_immutable_manifest_url(self) -> None:
+        seen: list[list[str]] = []
+
+        def run(command: list[str], _timeout: int):
+            seen.append(command)
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout=f"{COMMIT}\trefs/heads/main\n",
+                stderr="",
+            )
+
+        commit = update.resolve_main_commit(run)
+        self.assertEqual(commit, COMMIT)
+        self.assertEqual(
+            seen[0],
+            [
+                "git",
+                "ls-remote",
+                "--exit-code",
+                "--refs",
+                "https://github.com/Who-is-Mirror/Mirror-CodeX-Skills.git",
+                "refs/heads/main",
+            ],
+        )
+        self.assertEqual(
+            update.manifest_url(commit),
+            "https://raw.githubusercontent.com/Who-is-Mirror/Mirror-CodeX-Skills/"
+            f"{COMMIT}/plugins/mirror-codex-skills/.codex-plugin/plugin.json",
+        )
+
+    def test_rejects_ambiguous_or_malformed_main_refs(self) -> None:
+        for output in ("", "not-a-sha\trefs/heads/main\n", f"{COMMIT}\tother\n"):
+            with self.subTest(output=output), self.assertRaises(ValueError):
+                update.resolve_main_commit(
+                    lambda command, _timeout, output=output: subprocess.CompletedProcess(
+                        command, 0, stdout=output, stderr=""
+                    )
+                )
+
     def test_accepts_only_the_pinned_bounded_manifest(self) -> None:
         payload = json.dumps({"name": update.TARGET_PLUGIN, "version": "0.2.0"}).encode()
         seen: list[tuple[str, float]] = []
@@ -48,7 +91,7 @@ class ManifestFetchTest(unittest.TestCase):
 
         result = update.fetch_manifest(
             "https://raw.githubusercontent.com/Who-is-Mirror/Mirror-CodeX-Skills/"
-            "main/plugins/mirror-codex-skills/.codex-plugin/plugin.json",
+            f"{COMMIT}/plugins/mirror-codex-skills/.codex-plugin/plugin.json",
             timeout=3,
             opener=opener,
         )
@@ -64,13 +107,13 @@ class ManifestFetchTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             update.fetch_manifest(
                 "https://raw.githubusercontent.com/Who-is-Mirror/Mirror-CodeX-Skills/"
-                "main/plugins/mirror-codex-skills/.codex-plugin/plugin.json",
+                f"{COMMIT}/plugins/mirror-codex-skills/.codex-plugin/plugin.json",
                 opener=lambda *_args, **_kwargs: Response(b'{"name":"a","name":"b"}'),
             )
         with self.assertRaises(ValueError):
             update.fetch_manifest(
                 "https://raw.githubusercontent.com/Who-is-Mirror/Mirror-CodeX-Skills/"
-                "main/plugins/mirror-codex-skills/.codex-plugin/plugin.json",
+                f"{COMMIT}/plugins/mirror-codex-skills/.codex-plugin/plugin.json",
                 opener=lambda *_args, **_kwargs: Response(
                     b"{" + b" " * update.MAX_MANIFEST_BYTES + b"}"
                 ),

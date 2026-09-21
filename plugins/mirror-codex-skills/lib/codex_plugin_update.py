@@ -13,11 +13,14 @@ from typing import Any
 
 MARKETPLACE = "mirror-codex-marketplace"
 TARGET_PLUGIN = "mirror-codex-skills"
+REPOSITORY_URL = "https://github.com/Who-is-Mirror/Mirror-CodeX-Skills.git"
+MANIFEST_PATH = "plugins/mirror-codex-skills/.codex-plugin/plugin.json"
 PLUGIN_VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 MAX_MANIFEST_BYTES = 1024 * 1024
 REMOTE_MANIFEST_TIMEOUT = 6
 UPDATE_COMMAND_TIMEOUT = 60
 MAX_COMMAND_OUTPUT_CHARS = 16000
+GIT_LOOKUP_TIMEOUT = 20
 
 
 def version_parts(value: str) -> tuple[int, int, int]:
@@ -34,6 +37,50 @@ def compare_versions(left: str, right: str) -> int:
     return (left_parts > right_parts) - (left_parts < right_parts)
 
 
+def run_git(command: list[str], timeout: int) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=timeout,
+    )
+
+
+def resolve_main_commit(
+    run_command: Callable[[list[str], int], Any] = run_git,
+) -> str:
+    """Resolve the current main commit so manifest reads are content-addressed."""
+    command = [
+        "git",
+        "ls-remote",
+        "--exit-code",
+        "--refs",
+        REPOSITORY_URL,
+        "refs/heads/main",
+    ]
+    completed = run_command(command, GIT_LOOKUP_TIMEOUT)
+    if completed.returncode != 0:
+        raise RuntimeError("cannot resolve the Mirror marketplace main commit")
+    lines = [line for line in str(completed.stdout or "").splitlines() if line.strip()]
+    if len(lines) != 1:
+        raise ValueError("Git returned an ambiguous main ref")
+    match = re.fullmatch(r"([0-9a-f]{40,64})\trefs/heads/main", lines[0])
+    if not match:
+        raise ValueError("Git returned an invalid main ref")
+    return match.group(1)
+
+
+def manifest_url(commit: str) -> str:
+    if not re.fullmatch(r"[0-9a-f]{40,64}", str(commit or "")):
+        raise ValueError("manifest commit must be a full hexadecimal object ID")
+    return (
+        "https://raw.githubusercontent.com/Who-is-Mirror/Mirror-CodeX-Skills/"
+        f"{commit}/{MANIFEST_PATH}"
+    )
+
+
 def fetch_manifest(
     url: str,
     timeout: float = REMOTE_MANIFEST_TIMEOUT,
@@ -45,7 +92,7 @@ def fetch_manifest(
         raise ValueError("manifest timeout must be finite and positive")
     if not re.fullmatch(
         r"https://raw\.githubusercontent\.com/Who-is-Mirror/"
-        r"Mirror-CodeX-Skills/main/plugins/mirror-codex-skills/"
+        r"Mirror-CodeX-Skills/[0-9a-f]{40,64}/plugins/mirror-codex-skills/"
         r"\.codex-plugin/plugin\.json",
         url,
     ):

@@ -24,6 +24,8 @@ from codex_plugin_update import (  # noqa: E402
     TARGET_PLUGIN,
     compare_versions,
     fetch_manifest,
+    manifest_url,
+    resolve_main_commit,
     run_codex,
     update_plugin,
     version_parts,
@@ -31,10 +33,6 @@ from codex_plugin_update import (  # noqa: E402
 
 
 SCHEMA = "mirror-codex-task-start-v1"
-MANIFEST_URL = (
-    "https://raw.githubusercontent.com/Who-is-Mirror/Mirror-CodeX-Skills/"
-    "main/plugins/mirror-codex-skills/.codex-plugin/plugin.json"
-)
 TASK_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 MAX_LOCAL_JSON_BYTES = 1024 * 1024
 REUSABLE_STATUSES = {
@@ -277,7 +275,9 @@ def ensure_task_started(
         codex_home or os.environ.get("CODEX_HOME") or Path.home() / ".codex"
     ).expanduser().resolve()
     read_inventory = inventory_reader or (lambda: _read_inventory(run_command))
-    fetch_current = fetch_remote or (lambda: fetch_manifest(MANIFEST_URL))
+    fetch_current = fetch_remote or (
+        lambda: fetch_manifest(manifest_url(resolve_main_commit()))
+    )
     try:
         binding = {
             "task_id": task_id,
